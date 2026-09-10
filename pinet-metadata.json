@@ -1,0 +1,68 @@
+{
+  "title": "B4U Esports - Premium Gaming UC & Diamonds Marketplace",
+  "description": "Buy PUBG UC and Mobile Legends Diamonds with Pi Network. The ultimate gaming currency marketplace for esports enthusiasts in Bhutan and beyond.",
+  "authors": [
+    {
+      "name": "B4U Esports Team",
+      "url": ""
+    }
+  ],
+  "keywords": [
+    "Pi Network",
+    "PUBG",
+    "Mobile Legends",
+    "Gaming",
+    "Esports",
+    "UC",
+    "Diamonds",
+    "Bhutan",
+    "Gaming Marketplace"
+  ],
+  "creator": "B4U Esports",
+  "publisher": "B4U Esports",
+  "formatDetection": {
+    "telephone": false,
+    "date": false,
+    "address": false,
+    "email": false,
+    "url": false
+  },
+  "abstract": "B4U Esports is the premier marketplace for gaming currencies in Bhutan, offering PUBG UC and Mobile Legends Diamonds for purchase with Pi Network.",
+  "category": "Gaming",
+  "classification": "Entertainment",
+  "openGraph": {
+    "type": "website",
+    "title": "B4U Esports - Premium Gaming UC & Diamonds Marketplace",
+    "description": "Buy PUBG UC and Mobile Legends Diamonds with Pi Network. The ultimate gaming currency marketplace for esports enthusiasts in Bhutan and beyond.",
+    "locale": "en_US",
+    "images": [
+      {
+        "url": "",
+        "width": 512,
+        "height": 512,
+        "alt": "B4U Esports Logo"
+      }
+    ],
+    "countryName": "Bhutan"
+  },
+  "twitter": {
+    "card": "summary_large_image",
+    "title": "B4U Esports - Premium Gaming UC & Diamonds Marketplace",
+    "description": "Buy PUBG UC and Mobile Legends Diamonds with Pi Network. The ultimate gaming currency marketplace for esports enthusiasts in Bhutan and beyond.",
+    "creator": "@b4uesports",
+    "creatorId": "1847509990053920768",
+    "images": [
+      {
+        "url": "",
+        "alt": "B4U Esports Logo"
+      }
+    ]
+  },
+  "icons": [
+    {
+      "url": "",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ]
+}

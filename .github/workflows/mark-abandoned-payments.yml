@@ -1,0 +1,82 @@
+name: Mark Abandoned Payments
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  mark-abandoned-payments:
+    runs-on: ubuntu-latest
+    name: Mark Abandoned Pending Payments as Failed
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_USER: ${{ secrets.SMTP_USER }}
+      SMTP_PASS: ${{ secrets.SMTP_PASS }}
+      SMTP_FROM: ${{ secrets.SMTP_FROM }}
+      SMTP_FROM_NAME: ${{ secrets.SMTP_FROM_NAME }}
+      FRONTEND_URL: ${{ secrets.VERCEL_APP_URL }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: |
+          npm cache clean --force
+          npm ci --include=dev
+
+      - name: Build abandoned payments task
+        run: |
+          echo "Building abandoned payments task..."
+          mkdir -p dist/server dist/tasks
+          npx esbuild server/db.ts server/services/email.ts --platform=node --packages=external --bundle --format=esm --outdir=dist/server --out-extension:.js=.js
+          npx esbuild server/tasks/mark-abandoned-payments.ts --platform=node --packages=external --bundle --format=esm --outdir=dist/tasks --out-extension:.js=.js
+          echo "Task build completed"
+
+      - name: Verify build artifacts
+        run: |
+          echo "Verifying dist/tasks directory..."
+          if [ -f dist/tasks/mark-abandoned-payments.js ]; then
+            echo "mark-abandoned-payments.js exists"
+            wc -l dist/tasks/mark-abandoned-payments.js
+          else
+            echo "mark-abandoned-payments.js NOT FOUND"
+            find dist -type f -name "*.js" 2>/dev/null | head -20
+            exit 1
+          fi
+
+      - name: Run mark-abandoned-payments task
+        env:
+          NODE_ENV: production
+        run: |
+          echo "Starting mark-abandoned-payments task at $(date)"
+          echo "This will mark pending payments abandoned after 5 minutes of inactivity"
+          echo "Running: node dist/tasks/mark-abandoned-payments.js"
+          echo "---"
+          node dist/tasks/mark-abandoned-payments.js
+          EXIT_CODE=$?
+          echo "---"
+          echo "Task completed at $(date) with exit code: $EXIT_CODE"
+          exit $EXIT_CODE
+
+      - name: Log on success
+        if: success()
+        run: |
+          echo "Successfully completed mark-abandoned-payments job"
+          echo "Timestamp: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+
+      - name: Log on failure
+        if: failure()
+        run: |
+          echo "Mark-abandoned-payments job failed"
+          echo "Timestamp: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+          exit 1

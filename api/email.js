@@ -1,0 +1,2 @@
+// Re-export email service functions from dist directory
+export { sendProfileUpdateEmail, sendPurchaseConfirmationEmail, sendAdminPurchaseNotification, sendPersonalizedMarketingEmail } from '../dist/server/services/email.js';

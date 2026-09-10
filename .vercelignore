@@ -1,0 +1,11 @@
+# Ignore scripts directory in production
+scripts/
+
+# Ignore other development files
+.env.local
+.env.development
+.env.test
+*.log
+node_modules/
+.git/
+README.md

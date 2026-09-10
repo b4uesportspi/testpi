@@ -1,0 +1,317 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                 String             @id @default(uuid())
+  piUID              String?            @unique
+  username           String
+  email              String?            @unique
+  phone              String?
+  walletAddress      String?            @db.VarChar(150)
+  referralCode       String?            @unique
+  referredBy         String?            @db.Uuid
+  isActive           Boolean            @default(true)
+  isProfileVerified  Boolean            @default(false)
+  tokens             Int                @default(0)
+  bonusTokens        Int                @default(0)
+  level              Int                @default(1)
+  country            String?            @default("Bhutan")
+  language           String?            @default("en")
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  wallet             Wallet?
+  rewardBalance      RewardBalance?
+  piTransactions     PiTransaction[]
+  tokenTransactions  TokenTransaction[]
+  redemptionRequests RedemptionRequest[]
+  rewardHistories    RewardHistory[]
+  purchaseRewards    PurchaseReward[]
+  tournamentRewards  TournamentReward[]
+  notifications      Notification[]
+  referralsSent      Referral[]         @relation("Referrer")
+  referralsReceived  Referral[]         @relation("Referred")
+  fraudFlags         FraudFlag[]
+  adminLogs          AdminLog[]
+  withdrawalLimits   WithdrawalLimit[]
+
+  @@index([piUID])
+  @@index([referralCode])
+}
+
+model Wallet {
+  id            String   @id @default(uuid())
+  user          User     @relation(fields: [userId], references: [id])
+  userId        String   @unique
+  address       String   @db.VarChar(150) @unique
+  network       String   @default("PI")
+  isVerified    Boolean  @default(false)
+  lastSyncedAt  DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model RewardBalance {
+  id          String   @id @default(uuid())
+  user        User     @relation(fields: [userId], references: [id])
+  userId      String   @unique
+  total       Int      @default(0)
+  locked      Int      @default(0)
+  earned      Int      @default(0)
+  spent       Int      @default(0)
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
+}
+
+model PiTransaction {
+  id                String   @id @default(uuid())
+  user              User     @relation(fields: [userId], references: [id])
+  userId            String
+  walletAddress     String   @db.VarChar(150)
+  amount            Float
+  direction         PiDirection
+  status            TransactionStatus @default(PENDING)
+  reference         String   @unique
+  note              String?
+  confirmedAt       DateTime?
+  processedAt       DateTime?
+  createdAt         DateTime @default(now())
+
+  @@index([userId])
+  @@index([walletAddress])
+}
+
+model TokenTransaction {
+  id                String               @id @default(uuid())
+  user              User                 @relation(fields: [userId], references: [id])
+  userId            String
+  type              TokenTransactionType
+  amount            Int
+  balanceBefore     Int
+  balanceAfter      Int
+  description       String?
+  metadata          Json?
+  externalRef       String?              @unique
+  createdAt         DateTime             @default(now())
+
+  @@index([userId])
+  @@index([type])
+}
+
+model TreasuryLog {
+  id          String   @id @default(uuid())
+  event       TreasuryEvent
+  amount      Int
+  reference   String?  @unique
+  details     Json?
+  createdBy   String?
+  createdAt   DateTime @default(now())
+}
+
+model RedemptionRequest {
+  id             String             @id @default(uuid())
+  user            User              @relation(fields: [userId], references: [id])
+  userId          String
+  walletAddress   String             @db.VarChar(150)
+  tokensRequested Int
+  piAmount        Float
+  feeAmount       Float
+  status          RedemptionStatus   @default(PENDING)
+  reviewedBy      String?
+  reviewNotes     String?
+  processedAt     DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@index([userId])
+  @@index([status])
+}
+
+model RewardHistory {
+  id          String   @id @default(uuid())
+  user        User     @relation(fields: [userId], references: [id])
+  userId      String
+  eventType   RewardEventType
+  amount      Int
+  source      String   @default("SYSTEM")
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+  @@index([eventType])
+}
+
+model Referral {
+  id            String   @id @default(uuid())
+  referrer      User     @relation("Referrer", fields: [referrerId], references: [id])
+  referrerId    String
+  referred      User     @relation("Referred", fields: [referredId], references: [id])
+  referredId    String
+  code          String   @unique
+  bonusAmount   Int      @default(0)
+  status        ReferralStatus @default(PENDING)
+  createdAt     DateTime @default(now())
+  completedAt   DateTime?
+}
+
+model PurchaseReward {
+  id          String   @id @default(uuid())
+  user        User     @relation(fields: [userId], references: [id])
+  userId      String
+  purchaseId  String
+  amount      Int
+  status      RewardStatus @default(PENDING)
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  awardedAt   DateTime?
+}
+
+model FraudFlag {
+  id          String   @id @default(uuid())
+  user        User     @relation(fields: [userId], references: [id])
+  userId      String
+  category    FraudCategory
+  severity    Int      @default(1)
+  evidence    Json?
+  resolved    Boolean  @default(false)
+  resolvedBy  String?
+  createdAt   DateTime @default(now())
+  resolvedAt  DateTime?
+}
+
+model TournamentReward {
+  id          String   @id @default(uuid())
+  user        User     @relation(fields: [userId], references: [id])
+  userId      String
+  tournamentId String
+  amount      Int
+  status      RewardStatus @default(PENDING)
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  awardedAt   DateTime?
+}
+
+model WithdrawalLimit {
+  id            String   @id @default(uuid())
+  user          User     @relation(fields: [userId], references: [id])
+  userId        String   @unique
+  dailyMax      Int      @default(20000)
+  weeklyMax     Int      @default(50000)
+  monthlyMax    Int      @default(150000)
+  usedToday     Int      @default(0)
+  usedThisWeek  Int      @default(0)
+  usedThisMonth Int      @default(0)
+  updatedAt     DateTime @updatedAt
+}
+
+model AdminLog {
+  id          String   @id @default(uuid())
+  admin        User     @relation(fields: [adminId], references: [id])
+  adminId     String
+  action      String
+  targetId    String?
+  details     Json?
+  ipAddress   String?
+  createdAt   DateTime @default(now())
+}
+
+model Notification {
+  id          String   @id @default(uuid())
+  user        User     @relation(fields: [userId], references: [id])
+  userId      String
+  title       String
+  message     String
+  category    NotificationCategory
+  isRead      Boolean  @default(false)
+  link        String?
+  createdAt   DateTime @default(now())
+}
+
+model SystemSetting {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
+}
+
+enum PiDirection {
+  IN
+  OUT
+}
+
+enum TransactionStatus {
+  PENDING
+  CONFIRMED
+  FAILED
+  CANCELLED
+}
+
+enum TokenTransactionType {
+  ISSUE
+  REWARD
+  TRANSFER
+  REDEEM
+  BURN
+  FEE
+  ADJUSTMENT
+}
+
+enum TreasuryEvent {
+  ISSUANCE
+  RESERVE
+  BURN
+  CLAIM
+  FEE
+  MANUAL_ADJUSTMENT
+}
+
+enum RedemptionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  PROCESSED
+}
+
+enum RewardEventType {
+  DAILY_BONUS
+  REFERRAL
+  PURCHASE
+  TOURNAMENT
+  MILESTONE
+  OTHER
+}
+
+enum ReferralStatus {
+  PENDING
+  COMPLETED
+  EXPIRED
+}
+
+enum RewardStatus {
+  PENDING
+  AWARDED
+  FAILED
+}
+
+enum FraudCategory {
+  WITHDRAWAL
+  REFERRAL
+  AUTHENTICATION
+  PAYMENT
+  TOURNAMENT
+  OTHER
+}
+
+enum NotificationCategory {
+  SYSTEM
+  REWARD
+  SECURITY
+  ADMIN
+}

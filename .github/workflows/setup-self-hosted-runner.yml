@@ -1,0 +1,55 @@
+name: Setup Self-Hosted Runner
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner_name:
+        description: 'Name for the self-hosted runner'
+        required: true
+        default: 'esports-runner'
+      runner_labels:
+        description: 'Labels for the runner (comma-separated)'
+        required: false
+        default: 'self-hosted,esports'
+
+jobs:
+  setup-runner:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate runner token
+        id: token
+        run: |
+          TOKEN=$(curl -s -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/${{ github.repository }}/actions/runners/registration-token | jq -r .token)
+          echo "::set-output name=token::$TOKEN"
+
+      - name: Display setup instructions
+        run: |
+          echo "# Self-Hosted Runner Setup Instructions"
+          echo ""
+          echo "## Prerequisites:"
+          echo "- Ubuntu 20.04+ or Windows Server 2019+ or macOS 10.15+"
+          echo "- Git installed"
+          echo "- At least 2GB RAM, 4GB disk space"
+          echo ""
+          echo "## Setup Commands:"
+          echo ""
+          echo "# Download and extract runner"
+          echo "mkdir actions-runner && cd actions-runner"
+          echo "curl -o actions-runner-linux-x64-2.311.0.tar.gz -L https://github.com/actions/runner/releases/download/v2.311.0/actions-runner-linux-x64-2.311.0.tar.gz"
+          echo "tar xzf ./actions-runner-linux-x64-2.311.0.tar.gz"
+          echo ""
+          echo "# Configure runner"
+          echo "./config.sh --url https://github.com/${{ github.repository }} --token ${{ steps.token.outputs.token }} --name ${{ github.event.inputs.runner_name }} --labels ${{ github.event.inputs.runner_labels }} --unattended"
+          echo ""
+          echo "# Install as service (Linux)"
+          echo "sudo ./svc.sh install"
+          echo "sudo ./svc.sh start"
+          echo ""
+          echo "# Or run manually"
+          echo "./run.sh"
+          echo ""
+          echo "## Update Workflows:"
+          echo "Change 'runs-on: ubuntu-latest' to 'runs-on: self-hosted'"

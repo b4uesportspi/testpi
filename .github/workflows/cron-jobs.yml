@@ -1,0 +1,76 @@
+name: Cron Jobs
+
+on:
+  schedule:
+    # Transaction sync - every 10 minutes
+    - cron: '*/10 * * * *'
+    # Inactive users marketing - every Sunday at 2:15 PM Bhutan time (08:15 UTC)
+    - cron: '15 8 * * 0'
+    # Monthly buyers rewards - run on the 28th-31st at 2:15 PM Bhutan time (08:15 UTC),
+    # then only continue when it's the last day of the month
+    - cron: '15 8 28-31 * *'
+  workflow_dispatch:
+
+jobs:
+  sync-transactions:
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '*/10 * * * *'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sync Transaction Statuses
+        run: |
+          echo "Calling transaction sync endpoint..."
+          curl -X POST \
+            -H "Authorization: Bearer ${{ secrets.CRON_AUTH_TOKEN }}" \
+            -H "x-secret-key: ${{ secrets.MARKETING_EMAIL_SECRET }}" \
+            -H "Content-Type: application/json" \
+            "${{ secrets.VERCEL_APP_URL }}/api/sync-transactions-es" \
+            --fail-with-body \
+            --max-time 180 \
+            --retry 3 \
+            --retry-delay 5
+
+  inactive-users-marketing:
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '15 8 * * 0'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Inactive User Re-engagement Emails
+        run: |
+          echo "Calling inactive users marketing endpoint..."
+          curl -X POST \
+            -H "x-secret-key: ${{ secrets.MARKETING_EMAIL_SECRET }}" \
+            -H "Content-Type: application/json" \
+            "${{ secrets.VERCEL_APP_URL }}/api/weekly-marketing" \
+            --fail-with-body \
+            --max-time 180 \
+            --retry 3 \
+            --retry-delay 10
+
+  monthly-buyers-rewards:
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '15 8 28-31 * *'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if today is the last day of the month
+        id: last_day_check
+        if: github.event_name != 'workflow_dispatch'
+        run: |
+          set -euo pipefail
+          if [ "$(date -u -d tomorrow +%d)" = "01" ]; then
+            echo "run_campaign=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run_campaign=false" >> "$GITHUB_OUTPUT"
+            echo "Not the last day of the month in UTC. Skipping monthly buyer rewards."
+          fi
+
+      - name: Send Monthly Buyer Reward Emails
+        if: github.event_name == 'workflow_dispatch' || steps.last_day_check.outputs.run_campaign == 'true'
+        run: |
+          set -euo pipefail
+          echo "Calling monthly buyers reward endpoint..."
+          curl -X POST \
+            -H "x-secret-key: ${{ secrets.MARKETING_EMAIL_SECRET }}" \
+            -H "Content-Type: application/json" \
+            "${{ secrets.VERCEL_APP_URL }}/api/monthly-marketing" \
+            --fail-with-body \
+            --max-time 300 \
+            --retry 3 \
+            --retry-delay 15

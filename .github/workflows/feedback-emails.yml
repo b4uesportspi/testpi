@@ -1,0 +1,114 @@
+name: Send Feedback Request Emails
+
+on:
+  schedule:
+    # Run daily at 10:00 AM UTC (adjust as needed)
+    - cron: '0 10 * * *'
+  
+  # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to run in'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - development
+
+jobs:
+  send-feedback-emails:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: |
+          npm cache clean --force
+          npm ci --include=dev
+
+      - name: Build project
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+          GOOGLE_AI_API_KEY: ${{ secrets.GOOGLE_AI_API_KEY }}
+          PI_SERVER_API_KEY: ${{ secrets.PI_SERVER_API_KEY }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          SMTP_FROM_NAME: ${{ secrets.SMTP_FROM_NAME }}
+          NODE_ENV: production
+        run: |
+          echo "🔨 Building project..."
+          npm run build
+          echo "✅ Build completed"
+
+      - name: Verify build artifacts
+        run: |
+          echo "📁 Verifying dist directory structure..."
+          echo "---"
+          ls -la dist/ 2>&1 | head -20
+          echo "---"
+          echo "📁 Checking dist/tasks directory..."
+          if [ -d dist/tasks ]; then
+            echo "✅ dist/tasks directory exists"
+            ls -la dist/tasks/
+          else
+            echo "❌ dist/tasks directory NOT FOUND"
+            echo "📁 Current directory contents:"
+            find dist -type f -name "*.js" 2>/dev/null | head -20
+            exit 1
+          fi
+          
+          if [ -f dist/tasks/send-feedback-emails.js ]; then
+            echo "✅ send-feedback-emails.js exists"
+            wc -l dist/tasks/send-feedback-emails.js
+          else
+            echo "❌ send-feedback-emails.js NOT FOUND"
+            exit 1
+          fi
+
+      - name: Send feedback emails
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+          GOOGLE_AI_API_KEY: ${{ secrets.GOOGLE_AI_API_KEY }}
+          PI_SERVER_API_KEY: ${{ secrets.PI_SERVER_API_KEY }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          SMTP_FROM_NAME: ${{ secrets.SMTP_FROM_NAME }}
+          NODE_ENV: production
+        run: |
+          echo "📧 Starting feedback email task at $(date)"
+          echo "📝 Running: npm run feedback:emails:prod"
+          echo "---"
+          npm run feedback:emails:prod
+          EXIT_CODE=$?
+          echo "---"
+          echo "✅ Feedback email task completed at $(date) with exit code: $EXIT_CODE"
+          exit $EXIT_CODE
+
+      - name: Log completion
+        if: success()
+        run: echo "✅ Feedback emails sent successfully at $(date)"
+
+      - name: Log failure
+        if: failure()
+        run: echo "❌ Feedback email job failed at $(date)"

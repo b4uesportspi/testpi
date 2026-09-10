@@ -1,0 +1,2142 @@
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+import axios from 'axios';
+import * as jwt from 'jsonwebtoken';
+import * as pkg from 'pg';
+import { sendProfileUpdateEmail, sendPurchaseConfirmationEmail, sendAdminPurchaseNotification } from './email.js';
+const { Pool } = pkg;
+
+// Use a global pool to prevent multiple connections in Vercel serverless
+let pool: pkg.Pool;
+
+// Handle SSL configuration for PostgreSQL - Handle Supabase connections properly
+const isSupabase = process.env.DATABASE_URL && process.env.DATABASE_URL.includes('supabase');
+
+// Configure pool based on environment
+const poolConfig: any = { 
+  connectionString: process.env.DATABASE_URL,
+  // Add better timeouts for Vercel serverless environment
+  connectionTimeoutMillis: 15000, // 15 seconds
+  statement_timeout: 15000, // 15 seconds
+  idleTimeoutMillis: 30000, // 30 seconds
+  max: 3, // Reduced maximum number of clients for serverless
+  allowExitOnIdle: true, // Allow process to exit when idle
+  keepAlive: true, // Enable keep-alive connections
+  keepAliveInitialDelayMillis: 10000, // 10 seconds
+  maxUses: 100, // Close (and replace) a connection after it has been used 100 times
+};
+
+// Handle SSL configuration for PostgreSQL connections
+if (isSupabase) {
+  // For Supabase, use rejectUnauthorized: false for Vercel compatibility
+  poolConfig.ssl = { 
+    rejectUnauthorized: false // For Vercel serverless, temporary bypass certificate verification
+  };
+  console.log('Configuring SSL for Supabase connection with certificate bypass for Vercel API');
+} else if (process.env.DATABASE_URL && process.env.DATABASE_URL.includes('sslmode=require')) {
+  // For other PostgreSQL connections with SSL
+  poolConfig.ssl = { 
+    rejectUnauthorized: false
+  };
+  console.log('Configuring SSL for PostgreSQL connection with certificate bypass for Vercel API');
+} else {
+  console.log('Configuring DB pool without SSL (local development)');
+}
+
+pool = new Pool(poolConfig);
+
+console.log('API Database pool created with config:', {
+  isSupabase,
+  hasSSL: !!poolConfig.ssl,
+  connectionTimeout: poolConfig.connectionTimeoutMillis,
+  maxConnections: poolConfig.max
+});
+
+const PI_API_BASE = 'https://api.minepi.com';
+const PI_SERVER_API_KEY = process.env.PI_SERVER_API_KEY || 'your_pi_server_api_key_here';
+
+const JWT_SECRET = process.env.JWT_SECRET || process.env.SESSION_SECRET || 'fallback-secret';
+
+// EmailJS configuration
+const EMAILJS_SERVICE_ID = process.env.EMAILJS_SERVICE_ID || 'your-service-id';
+const EMAILJS_TEMPLATE_ID = process.env.EMAILJS_TEMPLATE_ID || 'your-template-id';
+const EMAILJS_PUBLIC_KEY = process.env.EMAILJS_PUBLIC_KEY || 'your-public-key';
+const EMAILJS_PRIVATE_KEY = process.env.EMAILJS_PRIVATE_KEY || undefined;
+
+// Handle connection errors gracefully
+pool.on('error', (err: Error) => {
+  console.error('API Database pool error:', err.message);
+  // Don't throw error here to prevent app crash
+});
+
+// Test database connection on startup with better error handling
+pool.query('SELECT NOW()', (err: Error, res: any) => {
+  if (err) {
+    console.error('API Database connection test failed:', err);
+    // Don't throw error here to prevent app crash, but log it clearly
+    console.warn('API Database connection test failed, but continuing to start app - queries will retry');
+  } else {
+    console.log('API Database connection test successful:', res.rows[0]);
+  }
+});
+
+// Handle PiNet metadata requests
+async function handlePiNetMeta(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "GET") {
+    return res.status(405).json({ message: "Method not allowed" });
+  }
+
+  try {
+    // Get the pathname from query parameters
+    const { pathname } = req.query;
+    
+    // Log the request for debugging
+    console.log('PiNet metadata request received for pathname:', pathname);
+    
+    // Define the base metadata
+    const baseMetadata = {
+      title: "B4U Esports - Premium Gaming UC & Diamonds Marketplace",
+      description: "Buy PUBG UC and Mobile Legends Diamonds with Pi Network. The ultimate gaming currency marketplace for esports enthusiasts in Bhutan and beyond.",
+      authors: [
+        {
+          name: "B4U Esports Team",
+          url: ""
+        }
+      ],
+      keywords: [
+        "Pi Network",
+        "PUBG",
+        "Mobile Legends",
+        "Gaming",
+        "Esports",
+        "UC",
+        "Diamonds",
+        "Bhutan",
+        "Gaming Marketplace"
+      ],
+      creator: "B4U Esports",
+      publisher: "B4U Esports",
+      formatDetection: {
+        telephone: false,
+        date: false,
+        address: false,
+        email: false,
+        url: false
+      },
+      abstract: "B4U Esports is the premier marketplace for gaming currencies in Bhutan, offering PUBG UC and Mobile Legends Diamonds for purchase with Pi Network.",
+      category: "Gaming",
+      classification: "Entertainment",
+      openGraph: {
+        type: "website",
+        title: "B4U Esports - Premium Gaming UC & Diamonds Marketplace",
+        description: "Buy PUBG UC and Mobile Legends Diamonds with Pi Network. The ultimate gaming currency marketplace for esports enthusiasts in Bhutan and beyond.",
+        locale: "en_US",
+        images: [
+          {
+            url: "",
+            width: 512,
+            height: 512,
+            alt: "B4U Esports Logo"
+          }
+        ],
+        countryName: "Bhutan"
+      },
+      twitter: {
+        card: "summary_large_image",
+        title: "B4U Esports - Premium Gaming UC & Diamonds Marketplace",
+        description: "Buy PUBG UC and Mobile Legends Diamonds with Pi Network. The ultimate gaming currency marketplace for esports enthusiasts in Bhutan and beyond.",
+        creator: "@b4uesports",
+        creatorId: "1847509990053920768",
+        images: [
+          {
+            url: "",
+            alt: "B4U Esports Logo"
+          }
+        ]
+      },
+      icons: [
+        {
+          url: "",
+          type: "image/png",
+          sizes: "512x512"
+        }
+      ]
+    };
+    
+    // Return the metadata
+    res.status(200).json(baseMetadata);
+  } catch (error: any) {
+    console.error('PiNet metadata error:', error);
+    res.status(500).json({ message: 'Failed to generate metadata', error: error.message });
+  }
+}
+
+// Add a function to test database connectivity
+const testDatabaseConnectivity = async () => {
+  try {
+    const client = await pool.connect();
+    console.log('Database connectivity test: Connection acquired');
+    const result = await client.query('SELECT 1 as test');
+    console.log('Database connectivity test: Query successful, result:', result.rows[0]);
+    client.release();
+    console.log('Database connectivity test: Connection released');
+    return true;
+  } catch (error) {
+    console.error('Database connectivity test failed:', error);
+    return false;
+  }
+};
+
+// Add a debug endpoint to check database connectivity
+async function handleDebugConfig(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "GET") {
+    return res.status(405).json({ message: "Method not allowed" });
+  }
+
+  try {
+    // Test database connectivity
+    console.log('Debug config: Testing database connectivity');
+    const dbConnected = await testDatabaseConnectivity();
+    
+    // Log CORS headers for debugging
+    console.log('CORS Headers:', {
+      'Access-Control-Allow-Origin': res.getHeader('Access-Control-Allow-Origin'),
+      'Access-Control-Allow-Methods': res.getHeader('Access-Control-Allow-Methods'),
+      'Access-Control-Allow-Headers': res.getHeader('Access-Control-Allow-Headers'),
+    });
+    
+    const configInfo = {
+      piServerApiKeyConfigured: isPiServerConfigured(),
+      piServerApiKeyLength: PI_SERVER_API_KEY ? PI_SERVER_API_KEY.length : 0,
+      piServerApiKeyPreview: PI_SERVER_API_KEY ? PI_SERVER_API_KEY.substring(0, 10) + '...' : 'NOT SET',
+      jwtSecretLength: JWT_SECRET ? JWT_SECRET.length : 0,
+      jwtSecretPreview: JWT_SECRET ? JWT_SECRET.substring(0, 10) + '...' : 'NOT SET',
+      databaseUrlConfigured: !!process.env.DATABASE_URL,
+      databaseUrlPreview: process.env.DATABASE_URL ? process.env.DATABASE_URL.substring(0, 50) + '...' : 'NOT SET',
+      databaseConnected: dbConnected,
+      corsHeaders: {
+        'Access-Control-Allow-Origin': res.getHeader('Access-Control-Allow-Origin'),
+        'Access-Control-Allow-Methods': res.getHeader('Access-Control-Allow-Methods'),
+        'Access-Control-Allow-Headers': res.getHeader('Access-Control-Allow-Headers'),
+      }
+    };
+    
+    console.log('Debug config info:', configInfo);
+    return res.status(200).json(configInfo);
+  } catch (error: any) {
+    console.error('Debug config error:', error);
+    return res.status(500).json({ message: 'Failed to retrieve debug config', error: error.message });
+  }
+}
+
+// Add a debug endpoint to check environment variables
+async function handleDebugEnv(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "GET") {
+    return res.status(405).json({ message: "Method not allowed" });
+  }
+
+  try {
+    const envInfo = {
+      piServerApiKeyConfigured: isPiServerConfigured(),
+      piServerApiKeyLength: PI_SERVER_API_KEY ? PI_SERVER_API_KEY.length : 0,
+      piServerApiKeyPreview: PI_SERVER_API_KEY ? PI_SERVER_API_KEY.substring(0, 10) + '...' : 'NOT SET',
+      jwtSecretLength: JWT_SECRET ? JWT_SECRET.length : 0,
+      jwtSecretPreview: JWT_SECRET ? JWT_SECRET.substring(0, 10) + '...' : 'NOT SET',
+      databaseUrlConfigured: !!process.env.DATABASE_URL,
+      databaseUrlPreview: process.env.DATABASE_URL ? process.env.DATABASE_URL.substring(0, 50) + '...' : 'NOT SET',
+    };
+    
+    console.log('Environment variables info:', envInfo);
+    return res.status(200).json(envInfo);
+  } catch (error: any) {
+    console.error('Debug env error:', error);
+    return res.status(500).json({ message: 'Debug env check failed', error: error.message });
+  }
+}
+
+// Add event listeners for pool errors
+pool.on('error', (err) => {
+  console.error('Database pool error:', err);
+});
+
+pool.on('connect', () => {
+  console.log('Database pool connection established');
+});
+
+pool.on('acquire', () => {
+  console.log('Database connection acquired from pool');
+});
+
+pool.on('remove', () => {
+  console.log('Database connection removed from pool');
+});
+
+pool.on('release', (err) => {
+  if (err) {
+    console.error('Database connection release error:', err);
+  } else {
+    console.log('Database connection released back to pool');
+  }
+});
+
+// Helper function to check if Pi Server API Key is configured
+const isPiServerConfigured = () => PI_SERVER_API_KEY && PI_SERVER_API_KEY !== 'your_pi_server_api_key_here';
+
+// Placeholder functions for all the missing handlers
+// These would need to be properly implemented based on your application logic
+
+async function handlePackages(req: VercelRequest, res: VercelResponse) {
+  // Implementation would go here
+  return res.status(200).json({ message: 'Packages endpoint placeholder' });
+}
+
+async function handlePiPrice(req: VercelRequest, res: VercelResponse) {
+  // Implementation would go here
+  return res.status(200).json({ message: 'Pi price endpoint placeholder' });
+}
+
+async function handleProfile(req: VercelRequest, res: VercelResponse) {
+  console.log('Profile endpoint: Starting profile request handling');
+  console.log('Profile endpoint: Request method:', req.method);
+  console.log('Profile endpoint: Request headers:', req.headers);
+  
+  // Get the authorization token to extract user info
+  // Support both standard Authorization header and Vercel's OIDC token
+  const authHeader = req.headers.authorization || req.headers['x-vercel-oidc-token'];
+  console.log('Profile endpoint: Auth header:', authHeader);
+  
+  // Check if we have a real Pi Server API Key
+  console.log('Profile endpoint: Pi Server configured:', isPiServerConfigured());
+  if (isPiServerConfigured()) {
+    // If no auth header, this might be a direct browser access - return an appropriate response
+    if (!authHeader) {
+      console.log('Profile endpoint: No authorization header provided');
+      return res.status(401).json({ message: 'No authorization header provided' });
+    }
+    
+    try {
+      // Ensure we're working with a string (headers can be arrays)
+      const headerValue = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+      console.log('Profile endpoint: Header value:', headerValue);
+      
+      // Extract username and userId from JWT token
+      // Strip the Bearer prefix if present
+      const token = headerValue?.startsWith('Bearer ') ? headerValue.substring(7) : headerValue;
+
+      console.log('Profile endpoint: Token:', token);
+      
+      // Validate token format first
+      if (!token || token.split('.').length !== 3) {
+        console.log('Profile endpoint: Malformed token or invalid JWT');
+        return res.status(401).json({ message: 'Malformed token or invalid JWT' });
+      }
+      
+      // Debug JWT header to check algorithm
+      let header;
+      try {
+        header = JSON.parse(Buffer.from(token.split('.')[0], 'base64').toString());
+        console.log('Profile endpoint: JWT Header:', header);
+      } catch (decodeError) {
+        console.log('Profile endpoint: Could not decode JWT header for debugging');
+      }
+      
+      // Handle different token types
+      if (header && header.alg === 'RS256') {
+        // This is a Pi Network token - we should not accept it for profile endpoint
+        // Profile endpoint should only accept our server-issued HS256 tokens
+        console.log('Profile endpoint: Rejecting RS256 token - only HS256 tokens are accepted');
+        return res.status(401).json({ message: 'Invalid token. Profile endpoint only accepts server-issued tokens.' });
+      } else if (header && header.alg === 'HS256') {
+        // This is our server-issued token - verify it
+        console.log('Profile endpoint: Verifying HS256 token');
+        // Verify the JWT token and extract user ID
+        // Force HS256 algorithm for HMAC-signed tokens
+        const jwtLib = await import('jsonwebtoken');
+        const decoded: any = jwtLib.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
+        const userId = decoded.userId;
+        console.log('Profile endpoint: Token verified, user ID:', userId);
+        
+        // Handle different HTTP methods
+        if (req.method === 'GET') {
+          // Fetch user data directly from database using raw SQL
+          const client = await pool.connect();
+          try {
+            // First try to select with tokens column
+            let result;
+            try {
+              result = await client.query(
+                'SELECT id, pi_uid, username, email, phone, country, language, wallet_address, game_accounts, referral_code, is_active, is_profile_verified, tokens, profile_picture, created_at, updated_at FROM app_users WHERE id = $1',
+                [userId]
+              );
+            } catch (columnError: any) {
+              // If tokens column doesn't exist, try without it
+              if (columnError.message && columnError.message.includes('tokens')) {
+                console.log('Profile endpoint: tokens column not found, trying without it');
+                result = await client.query(
+                  'SELECT id, pi_uid, username, email, phone, country, language, wallet_address, game_accounts, referral_code, is_active, is_profile_verified, profile_picture, created_at, updated_at FROM app_users WHERE id = $1',
+                  [userId]
+                );
+                // Add tokens field with default value to each row
+                result.rows = result.rows.map(row => ({ ...row, tokens: 0 }));
+              } else {
+                throw columnError;
+              }
+            }
+            
+            if (result.rows.length === 0) {
+              console.log('Profile endpoint: User not found for ID:', userId);
+              return res.status(404).json({ message: 'User not found' });
+            }
+            
+            // Map database columns to expected API response format
+            let user = {
+              id: result.rows[0].id,
+              piUID: result.rows[0].pi_uid,
+              username: result.rows[0].username,
+              email: result.rows[0].email,
+              phone: result.rows[0].phone,
+              country: result.rows[0].country,
+              language: result.rows[0].language,
+              walletAddress: result.rows[0].wallet_address,
+              gameAccounts: result.rows[0].game_accounts,
+              // Updated to fetch referral code from the referral_codes table
+              referralCode: await getUserReferralCode(result.rows[0].id),
+              isActive: result.rows[0].is_active,
+              isProfileVerified: result.rows[0].is_profile_verified,
+              tokens: result.rows[0].tokens,
+              profilePicture: result.rows[0].profile_picture,
+              createdAt: result.rows[0].created_at,
+              updatedAt: result.rows[0].updated_at,
+            };
+            
+            console.log('Profile endpoint: User data fetched:', user);
+            return res.status(200).json(user);
+          } catch (error: any) {
+            console.error('Profile endpoint: Error fetching user data:', error);
+            return res.status(500).json({ message: 'Failed to fetch user data', error: error.message });
+          } finally {
+            client.release();
+            console.log('Profile endpoint: Database connection released');
+          }
+        } else if (req.method === 'PUT') {
+          // Update user profile
+          const updateData = req.body;
+          
+          console.log('Profile endpoint: Updating profile for user', userId, 'with data size:', JSON.stringify(updateData).length);
+          
+          // Check if the request body is too large
+          const requestBodySize = JSON.stringify(updateData).length;
+          const maxSize = 5 * 1024 * 1024; // 5MB limit
+          
+          if (requestBodySize > maxSize) {
+            console.log('Profile endpoint: Request body too large:', requestBodySize);
+            return res.status(413).json({ 
+              message: 'Request entity too large. Please reduce the size of your profile picture.',
+              maxSize: maxSize,
+              actualSize: requestBodySize
+            });
+          }
+          
+          // Validate required fields
+          if (!updateData.email || !updateData.phone) {
+            return res.status(400).json({ message: 'Email and phone number are required' });
+          }
+
+          // Validate email format
+          if (updateData.email && !updateData.email.endsWith('@gmail.com')) {
+            return res.status(400).json({ message: 'Email must be a Gmail address' });
+          }
+
+          // Optimize profile picture if it's too large
+          if (updateData.profilePicture && updateData.profilePicture.startsWith('data:image')) {
+            console.log('Profile endpoint: Profile picture detected, size:', updateData.profilePicture.length);
+            
+            // If profile picture is larger than 1MB, return an error asking user to use a smaller image
+            if (updateData.profilePicture.length > 1024 * 1024) {
+              console.log('Profile endpoint: Profile picture too large:', updateData.profilePicture.length);
+              return res.status(400).json({ 
+                message: 'Profile picture is too large. Please select an image smaller than 1MB or compress your current image.' 
+              });
+            }
+          }
+
+          // Check if required fields are provided to set profile as verified
+          if (updateData.email && updateData.phone) {
+            updateData.isProfileVerified = true;
+            console.log('Profile verification enabled for user:', userId);
+          } else {
+            console.log('Profile verification not enabled - email:', !!updateData.email, 'phone:', !!updateData.phone);
+          }
+          
+          // Validate game account IDs are numeric if provided
+          if (updateData.gamesPlayed?.pubg) {
+            if (updateData.gameAccounts?.pubg?.uid && !/^\d+$/.test(updateData.gameAccounts.pubg.uid)) {
+              return res.status(400).json({ message: 'PUBG Player UID must be numeric' });
+            }
+          }
+          
+          if (updateData.gamesPlayed?.mlbb) {
+            if (updateData.gameAccounts?.mlbb?.userId && !/^\d+$/.test(updateData.gameAccounts.mlbb.userId)) {
+              return res.status(400).json({ message: 'Mobile Legends User ID must be numeric' });
+            }
+            
+            if (updateData.gameAccounts?.mlbb?.zoneId && !/^\d+$/.test(updateData.gameAccounts.mlbb.zoneId)) {
+              return res.status(400).json({ message: 'Mobile Legends Zone ID must be numeric' });
+            }
+          }
+          
+          if (updateData.gamesPlayed?.coc) {
+            if (updateData.gameAccounts?.coc?.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(updateData.gameAccounts.coc.email)) {
+              return res.status(400).json({ message: 'Clash of Clans email must be a valid email address' });
+            }
+          }
+          
+          // Prepare game accounts data
+          let gameAccounts: any = null;
+          if (updateData.gamesPlayed) {
+            gameAccounts = {};
+            if (updateData.gamesPlayed.pubg && updateData.gameAccounts?.pubg) {
+              gameAccounts.pubg = {
+                ign: updateData.gameAccounts.pubg.ign || '',
+                uid: updateData.gameAccounts.pubg.uid || ''
+              };
+            }
+            if (updateData.gamesPlayed.mlbb && updateData.gameAccounts?.mlbb) {
+              gameAccounts.mlbb = {
+                userId: updateData.gameAccounts.mlbb.userId || '',
+                zoneId: updateData.gameAccounts.mlbb.zoneId || ''
+              };
+            }
+            if (updateData.gamesPlayed.coc && updateData.gameAccounts?.coc) {
+              gameAccounts.coc = {
+                email: updateData.gameAccounts.coc.email || ''
+              };
+            }
+          }
+          
+          // Update user in database
+          const client = await pool.connect();
+          try {
+            // Check if user provided a referral code
+            if (updateData.referredBy) {
+              // Handle referral code usage
+              const referralResult = await handleReferralCodeUsage(client, userId, updateData.referredBy);
+              if (!referralResult.success) {
+                console.log('Referral code processing failed:', referralResult.message);
+                // Don't fail the entire profile update if referral processing fails
+                // Just log the error and continue
+              } else {
+                console.log('Referral code processed successfully, tokens awarded:', referralResult.tokensAwarded);
+              }
+            }
+            
+            const result = await client.query(
+              `UPDATE app_users 
+               SET email = $1, phone = $2, country = $3, language = $4, game_accounts = $5, is_profile_verified = $6, profile_picture = $7, updated_at = NOW()
+               WHERE id = $8
+               RETURNING id, pi_uid, username, email, phone, country, language, wallet_address, game_accounts, is_active, is_profile_verified, tokens, profile_picture, created_at, updated_at`,
+              [
+                updateData.email,
+                updateData.phone,
+                updateData.country || 'BT',
+                updateData.language || 'en',
+                gameAccounts ? JSON.stringify(gameAccounts) : null,
+                updateData.isProfileVerified || false,
+                updateData.profilePicture || null,
+                userId
+              ]
+            );
+            
+            if (result.rows.length === 0) {
+              return res.status(404).json({ message: 'User not found' });
+            }
+            
+            // Map database columns to expected API response format
+            let updatedUser = {
+              id: result.rows[0].id,
+              piUID: result.rows[0].pi_uid,
+              username: result.rows[0].username,
+              email: result.rows[0].email,
+              phone: result.rows[0].phone,
+              country: result.rows[0].country,
+              language: result.rows[0].language,
+              walletAddress: result.rows[0].wallet_address,
+              gameAccounts: result.rows[0].game_accounts,
+              // Updated to fetch referral code from the referral_codes table
+              referralCode: await getUserReferralCode(result.rows[0].id),
+              isActive: result.rows[0].is_active,
+              isProfileVerified: result.rows[0].is_profile_verified,
+              tokens: result.rows[0].tokens,
+              profilePicture: result.rows[0].profile_picture,
+              createdAt: result.rows[0].created_at,
+              updatedAt: result.rows[0].updated_at,
+            };
+            
+            // Ensure user has a referral code - generate one if not present
+            if (!updatedUser.referralCode) {
+              const referralCode = generateReferralCode();
+              // Insert the new referral code into the referral_codes table
+              try {
+                await client.query(
+                  'INSERT INTO referral_codes (code, user_id) VALUES ($1, $2)',
+                  [referralCode, updatedUser.id]
+                );
+                updatedUser.referralCode = referralCode;
+                console.log('Referral code generated for:', updatedUser.username, referralCode);
+              } catch (referralError: any) {
+                // Handle foreign key constraint violations or other errors
+                console.error('Error generating referral code for user:', updatedUser.id, referralError.message);
+                // Don't fail the entire profile update process if referral code generation fails
+                // The user can still use the app without a referral code
+              }
+            }
+            
+            console.log('Profile endpoint: Profile updated successfully for user', userId);
+            
+            // Send profile update email notification
+            try {
+              await sendProfileUpdateEmail({
+                to: updateData.email,
+                username: updatedUser.username,
+                profileData: updateData
+              });
+              console.log('Profile endpoint: Profile update email sent successfully to', updateData.email);
+            } catch (emailError) {
+              console.error('Profile endpoint: Failed to send profile update email:', emailError);
+            }
+            
+            return res.status(200).json(updatedUser);
+          } finally {
+            client.release();
+          }
+        } else {
+          return res.status(405).json({ message: 'Method not allowed' });
+        }
+      } else {
+        // Unknown token algorithm
+        console.log('Profile endpoint: Unknown token algorithm:', header?.alg);
+        return res.status(401).json({ message: 'Invalid token algorithm. Only server-issued tokens are accepted.' });
+      }
+    } catch (error: any) {
+      console.error('Profile endpoint: Failed to decode token or fetch user data', error);
+      // More descriptive error messages
+      if (error.name === 'JsonWebTokenError') {
+        return res.status(401).json({ message: 'Invalid token format', error: error.message });
+      } else if (error.name === 'TokenExpiredError') {
+        return res.status(401).json({ message: 'Token expired', error: error.message });
+      } else {
+        return res.status(401).json({ message: 'Invalid token or failed to fetch user data', error: error.message });
+      }
+    }
+  }
+
+  // If we don't have a real Pi Server API Key, return an error
+  console.log('Profile endpoint: Pi Server API Key not configured');
+  return res.status(500).json({ message: 'Pi Server API Key not configured' });
+}
+
+async function handleTransactions(req: VercelRequest, res: VercelResponse) {
+  const startTime = Date.now();
+  const requestId = Math.random().toString(36).substring(2, 15);
+  
+  console.log(`[${requestId}] Transactions endpoint: Request received`, {
+    method: req.method,
+    url: req.url,
+    headers: req.headers,
+    query: req.query,
+    startTime: new Date().toISOString()
+  });
+
+  if (req.method !== "GET") {
+    const errorResponse = { 
+      message: "Method not allowed", 
+      method: req.method, 
+      allowedMethods: ["GET"],
+      requestId 
+    };
+    console.log(`[${requestId}] Transactions endpoint: Method not allowed`, errorResponse);
+    return res.status(405).json(errorResponse);
+  }
+
+  try {
+    // Get the authorization token to extract user info
+    // Support both standard Authorization header and Vercel's OIDC token
+    const authHeader = req.headers.authorization || req.headers['x-vercel-oidc-token'];
+    
+    if (!authHeader) {
+      const errorResponse = { 
+        message: 'No authorization header provided', 
+        requestId 
+      };
+      console.log(`[${requestId}] Transactions endpoint: No authorization header provided`, errorResponse);
+      return res.status(401).json(errorResponse);
+    }
+    
+    // Ensure we're working with a string (headers can be arrays)
+    const headerValue = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+    // Strip the Bearer prefix if present
+    const token = headerValue?.startsWith('Bearer ') ? headerValue.substring(7) : headerValue;
+    
+    // Validate token format first
+    if (!token || token.split('.').length !== 3) {
+      const errorResponse = { 
+        message: 'Malformed token or invalid JWT', 
+        requestId 
+      };
+      console.log(`[${requestId}] Transactions endpoint: Malformed token`, errorResponse);
+      return res.status(401).json(errorResponse);
+    }
+    
+    // Debug JWT header to check algorithm
+    let header;
+    try {
+      header = JSON.parse(Buffer.from(token.split('.')[0], 'base64').toString());
+      console.log(`[${requestId}] JWT Header:`, header);
+    } catch (decodeError) {
+      const errorResponse = { 
+        message: 'Could not decode JWT header for debugging', 
+        requestId 
+      };
+      console.log(`[${requestId}] Transactions endpoint: JWT decode error`, errorResponse);
+    }
+    
+    // Handle different token types
+    if (header && header.alg === 'RS256') {
+      // This is a Pi Network token - we should not accept it for transactions endpoint
+      // Transactions endpoint should only accept our server-issued HS256 tokens
+      const errorResponse = { 
+        message: 'Invalid token. Transactions endpoint only accepts server-issued tokens.', 
+        tokenAlgorithm: header?.alg,
+        requestId 
+      };
+      console.log(`[${requestId}] Transactions endpoint: Rejecting RS256 token`, errorResponse);
+      return res.status(401).json(errorResponse);
+    } else if (header && header.alg === 'HS256') {
+      // This is our server-issued token - verify it
+      // Verify the JWT token and extract user ID
+      // Force HS256 algorithm for HMAC-signed tokens
+      const jwtLib = await import('jsonwebtoken');
+      const decoded: any = jwtLib.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
+      const userId = decoded.userId;
+      
+      console.log(`[${requestId}] Transactions endpoint: Token verified for user`, { userId });
+      
+      // Get query parameters for filtering and sorting
+      const { status, sort } = req.query;
+      
+      console.log(`[${requestId}] Transactions endpoint: Query parameters`, { status, sort });
+      
+      // Build the SQL query with optional filters
+      let baseQuery = `
+        SELECT t.id, t.user_id, t.package_id, t.payment_id, t.txid, t.pi_amount, t.usd_amount, t.pi_price_at_time, 
+        t.status, t.game_account, t.metadata, t.email_sent, t.created_at, t.updated_at,
+        p.name as package_name, p.game as package_game, p.in_game_amount as package_in_game_amount,
+        p.usdt_value as package_usdt_value, p.image as package_image
+        FROM transactions t
+        JOIN packages p ON t.package_id = p.id
+        WHERE t.user_id = $1
+      `;
+      
+      const queryParams: any[] = [userId];
+      
+      // Add status filter if provided
+      if (status && status !== 'all') {
+        baseQuery += ` AND t.status = $2`;
+        queryParams.push(status);
+      }
+      
+      // Add sorting
+      if (sort === 'amount') {
+        baseQuery += ` ORDER BY t.pi_amount DESC`;
+      } else {
+        baseQuery += ` ORDER BY t.created_at DESC`;
+      }
+      
+      console.log(`[${requestId}] Transactions endpoint: SQL query`, { 
+        query: baseQuery, 
+        params: queryParams 
+      });
+      
+      // Fetch transactions directly from database using raw SQL
+      const client = await pool.connect();
+      try {
+        console.log(`[${requestId}] Transactions endpoint: Fetching transactions for user`, { userId });
+        
+        const result = await client.query(baseQuery, queryParams);
+        
+        console.log(`[${requestId}] Transactions endpoint: Fetched transactions`, { 
+          userId, 
+          count: result.rows.length,
+          duration: Date.now() - startTime 
+        });
+        
+        // Map database columns to expected API response format
+        const transactions = result.rows.map(row => ({
+          id: row.id,
+          userId: row.user_id,
+          packageId: row.package_id,
+          paymentId: row.payment_id,
+          txid: row.txid,
+          piAmount: row.pi_amount,
+          usdAmount: row.usd_amount,
+          piPriceAtTime: row.pi_price_at_time,
+          status: row.status,
+          gameAccount: row.game_account,
+          metadata: row.metadata,
+          emailSent: row.email_sent,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+          package: {
+            id: row.package_id,
+            name: row.package_name,
+            game: row.package_game,
+            inGameAmount: row.package_in_game_amount,
+            usdtValue: row.package_usdt_value,
+            image: row.package_image,
+            isActive: true,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at,
+          }
+        }));
+        
+        const responseTime = Date.now() - startTime;
+        console.log(`[${requestId}] Transactions endpoint: Returning transactions`, { 
+          userId, 
+          count: transactions.length,
+          responseTime,
+          success: true 
+        });
+        
+        res.status(200).json(transactions);
+      } finally {
+        client.release();
+        console.log(`[${requestId}] Transactions endpoint: Database client released`);
+      }
+    } else {
+      // Unknown token algorithm
+      const errorResponse = { 
+        message: 'Invalid token algorithm. Only server-issued tokens are accepted.', 
+        tokenAlgorithm: header?.alg,
+        requestId 
+      };
+      console.log(`[${requestId}] Transactions endpoint: Unknown token algorithm`, errorResponse);
+      return res.status(401).json(errorResponse);
+    }
+  } catch (error: any) {
+    const errorResponse = { 
+      message: 'Invalid token or failed to fetch transactions', 
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+      requestId,
+      duration: Date.now() - startTime
+    };
+    
+    console.error(`[${requestId}] Transactions endpoint: Fetch error`, errorResponse);
+    
+    // More descriptive error messages
+    if (error.name === 'JsonWebTokenError') {
+      return res.status(401).json({ 
+        message: 'Invalid token format', 
+        error: error.message,
+        requestId 
+      });
+    } else if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({ 
+        message: 'Token expired', 
+        error: error.message,
+        requestId 
+      });
+    } else if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') {
+      return res.status(500).json({ 
+        message: 'Database connection failed', 
+        error: error.message,
+        requestId 
+      });
+    } else {
+      return res.status(500).json(errorResponse);
+    }
+  }
+}
+
+async function handleAdminLogin(req: VercelRequest, res: VercelResponse) {
+  console.log('Admin Login endpoint: Function called with method:', req.method);
+  console.log('Admin Login endpoint: Request headers:', req.headers);
+  console.log('Admin Login endpoint: Request body:', req.body);
+  console.log('Admin Login endpoint: Full request object:', {
+    method: req.method,
+    url: req.url,
+    query: req.query,
+    headers: req.headers,
+    body: req.body
+  });
+  
+  // More detailed method checking
+  console.log('Admin Login endpoint: Request method details:', {
+    method: req.method,
+    methodType: typeof req.method,
+    methodLength: req.method ? req.method.length : 0,
+    isPost: req.method === "POST",
+    methodUppercase: req.method ? req.method.toUpperCase() : 'undefined',
+    methodLowercase: req.method ? req.method.toLowerCase() : 'undefined'
+  });
+  
+  if (req.method !== "POST") {
+    console.log('Admin Login endpoint: Method not allowed', req.method);
+    return res.status(405).json({ 
+      message: "Method not allowed. Expected POST, got " + req.method,
+      method: req.method,
+      allowed: "POST"
+    });
+  }
+
+}
+
+async function handleAddUserTokens(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ message: "Method not allowed" });
+  }
+
+  try {
+    // Get the authorization token to extract user info
+    const authHeader = req.headers.authorization;
+    
+    if (!authHeader) {
+      return res.status(401).json({ message: 'No token provided. Please log in again.' });
+    }
+
+    // Ensure we're working with a string (headers can be arrays)
+    const headerValue = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+    // Strip the Bearer prefix if present
+    const token = headerValue?.startsWith('Bearer ') ? headerValue.substring(7) : headerValue;
+
+    // Validate JWT format before verification
+    if (!token || token.split('.').length !== 3) {
+      return res.status(401).json({ message: 'Invalid token format. Please log in again.' });
+    }
+
+    let decoded: any;
+    try {
+      // Explicitly specify the algorithm to prevent "invalid algorithm" errors
+      const jwtLib = await import('jsonwebtoken');
+      decoded = jwtLib.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
+    } catch (verifyError: any) {
+      console.error('JWT verification error:', verifyError.message);
+      console.error('Token header:', JSON.parse(Buffer.from(token.split('.')[0], 'base64').toString()));
+      return res.status(401).json({ message: 'Invalid token signature. Please log in again.' });
+    }
+    
+    const userId = decoded.userId;
+
+    const { amount, adId } = req.body;
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ message: 'Invalid token amount. Amount must be a positive number.' });
+    }
+
+    // If adId is provided, verify the ad status with Pi Platform API
+    if (adId) {
+      console.log('Add User Tokens endpoint: AdId provided, but Pi Network ad verification not implemented in Vercel API');
+      // Note: In the Vercel environment, we don't have access to piNetworkService
+      // so we'll skip the ad verification for now
+    }
+
+    // Update user tokens in database directly (similar to server-side implementation)
+    // Connect to database and update tokens
+    const client = await pool.connect();
+    try {
+      console.log(`Adding ${amount} tokens to user ${userId}`);
+      
+      // Update user tokens in database
+      const result = await client.query(
+        'UPDATE app_users SET tokens = tokens + $1, updated_at = NOW() WHERE id = $2 RETURNING id, tokens',
+        [amount, userId]
+      );
+      
+      if (result.rows.length === 0) {
+        console.log('Add User Tokens endpoint: User not found for ID:', userId);
+        return res.status(404).json({ message: 'User not found. Please log in again.' });
+      }
+      
+      const updatedUser = result.rows[0];
+      console.log(`Tokens added successfully. New token count: ${updatedUser.tokens}`);
+      
+      return res.status(200).json({ 
+        message: 'Tokens added successfully',
+        tokens: updatedUser.tokens 
+      });
+    } finally {
+      client.release();
+    }
+  } catch (error: any) {
+    console.error('Add User Tokens endpoint: Addition error:', error);
+    res.status(500).json({ 
+      message: 'Token addition failed', 
+      error: error.message 
+    });
+  }
+}
+
+async function handleReferralReward(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ message: "Method not allowed" });
+  }
+
+  try {
+    // Get the authorization token to extract user info
+    const authHeader = req.headers.authorization;
+    
+    if (!authHeader) {
+      return res.status(401).json({ message: 'No authorization header provided' });
+    }
+    
+    // Ensure we're working with a string (headers can be arrays)
+    const headerValue = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+    // Strip the Bearer prefix if present
+    const token = headerValue?.startsWith('Bearer ') ? headerValue.substring(7) : headerValue;
+    
+    // Validate token format first
+    if (!token || token.split('.').length !== 3) {
+      return res.status(401).json({ message: 'Malformed token or invalid JWT' });
+    }
+    
+    // Verify the JWT token and extract user ID
+    // Force HS256 algorithm for HMAC-signed tokens
+    const jwtLib = await import('jsonwebtoken');
+    const decoded: any = jwtLib.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
+    const userId = decoded.userId;
+    
+    // Reward the referrer
+    await rewardReferrer(userId);
+    
+    res.status(200).json({ message: 'Referral reward processed successfully' });
+  } catch (error: any) {
+    console.error('Referral reward error:', error);
+    if (error.name === 'JsonWebTokenError') {
+      return res.status(401).json({ message: 'Invalid token format', error: error.message });
+    } else if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({ message: 'Token expired', error: error.message });
+    } else {
+      return res.status(500).json({ message: `Failed to process referral reward: ${error.message}`, error: error.message });
+    }
+  }
+}
+
+async function handleReferralStats(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "GET") {
+    return res.status(405).json({ message: "Method not allowed" });
+  }
+
+  try {
+    // Get the authorization token to extract user info
+    const authHeader = req.headers.authorization;
+    
+    if (!authHeader) {
+      return res.status(401).json({ message: 'No authorization header provided' });
+    }
+    
+    // Ensure we're working with a string (headers can be arrays)
+    const headerValue = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+    // Strip the Bearer prefix if present
+    const token = headerValue?.startsWith('Bearer ') ? headerValue.substring(7) : headerValue;
+    
+    // Validate token format first
+    if (!token || token.split('.').length !== 3) {
+      return res.status(401).json({ message: 'Malformed token or invalid JWT' });
+    }
+    
+    // Verify the JWT token and extract user ID
+    // Force HS256 algorithm for HMAC-signed tokens
+    const jwtLib = await import('jsonwebtoken');
+    const decoded: any = jwtLib.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
+    const userId = decoded.userId;
+    
+    // Get referral stats from the new referral_rewards table
+    const stats = await getUserReferralStats(userId);
+    
+    res.status(200).json(stats);
+  } catch (error: any) {
+    console.error('Referral stats error:', error);
+    if (error.name === 'JsonWebTokenError') {
+      return res.status(401).json({ message: 'Invalid token format', error: error.message });
+    } else if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({ message: 'Token expired', error: error.message });
+    } else {
+      return res.status(500).json({ message: `Failed to get referral stats: ${error.message}`, error: error.message });
+    }
+  }
+}
+
+async function handleUserBalance(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "GET") {
+    console.log('User Balance endpoint: Method not allowed', req.method);
+    return res.status(405).json({ 
+      message: "Method not allowed. Expected GET, got " + req.method,
+      method: req.method,
+      allowed: "GET"
+    });
+  }
+
+  try {
+    console.log('User Balance endpoint: Function called with method:', req.method);
+    console.log('User Balance endpoint: Request headers:', req.headers);
+    
+    // Get the authorization token to extract user info
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      console.log('User Balance endpoint: No token provided');
+      return res.status(401).json({ message: 'No token provided' });
+    }
+
+    // Ensure we're working with a string (headers can be arrays)
+    const headerValue = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+    // Strip the Bearer prefix if present
+    const token = headerValue?.startsWith('Bearer ') ? headerValue.substring(7) : headerValue;
+
+    // Validate JWT format before verification
+    if (!token || token.split('.').length !== 3) {
+      console.log('User Balance endpoint: Invalid token format');
+      return res.status(401).json({ message: 'Invalid token format' });
+    }
+
+    let decoded: any;
+    try {
+      // Explicitly specify the algorithm to prevent "invalid algorithm" errors
+      const jwtLib = await import('jsonwebtoken');
+      decoded = jwtLib.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
+    } catch (verifyError: any) {
+      console.error('User Balance endpoint: JWT verification error:', verifyError.message);
+      console.error('User Balance endpoint: Token header:', JSON.parse(Buffer.from(token.split('.')[0], 'base64').toString()));
+      return res.status(401).json({ message: 'Invalid token signature' });
+    }
+    
+    const userId = decoded.userId;
+    console.log('User Balance endpoint: Token verified, user ID:', userId);
+
+    // Connect to database to fetch user wallet address
+    const client = await pool.connect();
+    try {
+      console.log('User Balance endpoint: Fetching user data for ID:', userId);
+      
+      // Fetch user to get wallet address
+      const result = await client.query(
+        'SELECT id, wallet_address FROM app_users WHERE id = $1',
+        [userId]
+      );
+      
+      if (result.rows.length === 0) {
+        console.log('User Balance endpoint: User not found for ID:', userId);
+        return res.status(404).json({ message: 'User not found' });
+      }
+      
+      const user = result.rows[0];
+      console.log('User Balance endpoint: User data fetched:', user);
+      
+      // Check if user has a wallet address
+      if (!user.wallet_address) {
+        console.log('User Balance endpoint: No wallet address found for user:', userId);
+        return res.status(404).json({ 
+          message: 'No wallet address found. Please complete a transaction first to connect your wallet.',
+          balance: null
+        });
+      }
+
+      // Fetch wallet balance using Stellar Horizon API
+      console.log('User Balance endpoint: Fetching wallet balance for address:', user.wallet_address);
+      const HORIZON_API_BASE = 'https://api.mainnet.minepi.com';
+      
+      try {
+        const response = await fetch(`${HORIZON_API_BASE}/accounts/${user.wallet_address}`);
+        const accountData = await response.json();
+        console.log('User Balance endpoint: Account data received:', accountData);
+        
+        // Find the native Pi balance (Pi is the native asset on Stellar)
+        const nativeBalance = accountData.balances.find((balance: any) => balance.asset_type === 'native');
+        
+        let balance = 0;
+        if (nativeBalance) {
+          balance = parseFloat(nativeBalance.balance);
+          console.log('User Balance endpoint: Native balance found:', balance);
+        } else {
+          console.log('User Balance endpoint: No native balance found');
+        }
+        
+        return res.status(200).json({ 
+          message: 'Wallet balance fetched successfully',
+          balance: balance,
+          walletAddress: user.wallet_address
+        });
+      } catch (apiError: any) {
+        console.error('User Balance endpoint: Stellar Horizon API error:', apiError.message);
+        return res.status(500).json({ 
+          message: 'Failed to fetch wallet balance. Please try again later.',
+          balance: null,
+          error: apiError.message
+        });
+      }
+    } finally {
+      client.release();
+    }
+  } catch (error: any) {
+    console.error('User Balance endpoint: Fetch balance error:', error);
+    return res.status(500).json({ 
+      message: 'Failed to fetch wallet balance',
+      balance: null,
+      error: error.message
+    });
+  }
+}
+
+async function handleTest(req: VercelRequest, res: VercelResponse) {
+  res.status(200).json({ message: 'Test endpoint working' });
+}
+
+async function handleAdminLogin(req: VercelRequest, res: VercelResponse) {
+  try {
+    console.log('Admin Login endpoint: Admin login attempt');
+    
+    const { username, password } = req.body;
+    if (!username || !password) {
+      console.log('Admin Login endpoint: Username or password missing');
+      return res.status(400).json({ message: 'Username and password required' });
+    }
+
+    // Check if we have a real database connection
+    if (!pool) {
+      console.log('Admin Login endpoint: Database not initialized');
+      return res.status(500).json({ message: 'Database not initialized' });
+    }
+
+    // Fetch admin from database using raw SQL
+    const client = await pool.connect();
+    try {
+      console.log('Admin Login endpoint: Checking credentials for', username);
+      
+      const result = await client.query(
+        'SELECT id, username, password, email, role, is_active, last_login FROM admins WHERE username = $1',
+        [username]
+      );
+      
+      if (result.rows.length === 0) {
+        console.log('Admin Login endpoint: Admin not found for username', username);
+        return res.status(401).json({ message: 'Invalid credentials' });
+      }
+      
+      const admin = result.rows[0];
+      
+      // Check if admin is active
+      if (!admin.is_active) {
+        console.log('Admin Login endpoint: Admin account is inactive for', username);
+        return res.status(401).json({ message: 'Account is inactive' });
+      }
+      
+      // Verify password using bcrypt
+      const bcrypt = await import('bcrypt');
+      const isValidPassword = await bcrypt.compare(password, admin.password);
+      
+      if (!isValidPassword) {
+        console.log('Admin Login endpoint: Invalid password for', username);
+        return res.status(401).json({ message: 'Invalid credentials' });
+      }
+      
+      // Update last login timestamp
+      await client.query(
+        'UPDATE admins SET last_login = NOW() WHERE id = $1',
+        [admin.id]
+      );
+      
+      // Generate JWT token
+      const jwt = await import('jsonwebtoken');
+      const token = jwt.sign(
+        { adminId: admin.id, username: admin.username, role: admin.role }, 
+        JWT_SECRET, 
+        { expiresIn: '8h', algorithm: 'HS256' }
+      );
+
+      // Return admin data without password
+      const adminData = {
+        id: admin.id,
+        username: admin.username,
+        email: admin.email,
+        role: admin.role,
+      };
+
+      console.log('Admin Login endpoint: Successful login for', username);
+      
+      res.status(200).json({
+        admin: adminData,
+        token: token,
+      });
+    } finally {
+      client.release();
+    }
+  } catch (error: any) {
+    console.error('Admin Login endpoint: Login error:', error);
+    res.status(500).json({ 
+      message: 'Login failed', 
+      error: error.message 
+    });
+  }
+}
+
+async function handlePiAuth(req: VercelRequest, res: VercelResponse) {
+  // Implementation would go here
+  return res.status(200).json({ message: 'Pi auth endpoint placeholder' });
+}
+
+async function handlePaymentApprove(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ message: "Method not allowed" });
+  }
+
+  try {
+    const { paymentId } = req.body;
+    if (!paymentId) {
+      return res.status(400).json({ message: 'Payment ID required' });
+    }
+
+    console.log('Payment Approve endpoint: Approving payment', { paymentId });
+
+    // Get transaction from database
+    const client = await pool.connect();
+    try {
+      // Get transaction by paymentId
+      const transactionResult = await client.query(
+        'SELECT t.*, u.email as user_email, u.username as user_username, p.name as package_name FROM transactions t JOIN app_users u ON t.user_id = u.id JOIN packages p ON t.package_id = p.id WHERE t.payment_id = $1',
+        [paymentId]
+      );
+
+      if (transactionResult.rows.length === 0) {
+        return res.status(404).json({ message: 'Transaction not found' });
+      }
+
+      const transaction = transactionResult.rows[0];
+      console.log('Payment Approve endpoint: Transaction found', { transactionId: transaction.id });
+
+      // Approve payment with Pi Network
+      let approved = false;
+      
+      // Only attempt Pi Network approval if we have a real Pi Server API Key
+      if (isPiServerConfigured()) {
+        try {
+          const piResponse = await fetch(`https://api.minepi.com/v2/payments/${paymentId}/approve`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Key ${process.env.PI_SERVER_API_KEY}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({})
+          });
+          
+          if (piResponse.ok) {
+            console.log('Payment Approve endpoint: Pi Network approval successful');
+            approved = true;
+          } else {
+            console.error('Payment Approve endpoint: Pi Network approval failed with status:', piResponse.status);
+            const errorData = await piResponse.text();
+            console.error('Payment Approve endpoint: Pi Network error data:', errorData);
+          }
+        } catch (piError: any) {
+          console.error('Payment Approve endpoint: Pi Network approval failed:', piError.message);
+        }
+      } else {
+        console.log('Payment Approve endpoint: Pi Server API Key not configured, skipping Pi Network approval');
+      }
+
+      if (approved) {
+        // Update transaction status to approved
+        await client.query(
+          'UPDATE transactions SET status = $1, updated_at = NOW() WHERE id = $2',
+          ['approved', transaction.id]
+        );
+        console.log('Payment Approve endpoint: Transaction approved', { transactionId: transaction.id });
+        
+        res.status(200).json({ success: true, transactionId: transaction.id });
+      } else {
+        // Even if Pi Network API fails, we still want to mark the transaction as approved locally
+        // This prevents users from losing their purchase if there's a temporary Pi Network issue
+        await client.query(
+          'UPDATE transactions SET status = $1, updated_at = NOW() WHERE id = $2',
+          ['approved', transaction.id]
+        );
+        console.log('Payment Approve endpoint: Transaction approved locally despite Pi Network failure', { transactionId: transaction.id });
+        
+        res.status(200).json({ success: true, transactionId: transaction.id });
+      }
+    } finally {
+      client.release();
+    }
+  } catch (error: any) {
+    console.error('Payment Approve endpoint: Approval error:', error);
+    res.status(500).json({ message: 'Payment approval failed', error: error.message });
+  }
+}
+
+async function handlePaymentComplete(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ message: "Method not allowed" });
+  }
+
+  try {
+    const { paymentId, txid } = req.body;
+    if (!paymentId || !txid) {
+      return res.status(400).json({ message: 'Payment ID and txid required' });
+    }
+
+    console.log('Payment Complete endpoint: Completing payment', { paymentId, txid });
+
+    // Get transaction from database
+    const client = await pool.connect();
+    try {
+      // Get transaction by paymentId
+      const transactionResult = await client.query(
+        'SELECT t.*, u.email as user_email, u.username as user_username, u.wallet_address as user_wallet_address, u.phone as user_phone, p.name as package_name, p.game as package_game, p.in_game_amount as package_in_game_amount FROM transactions t JOIN app_users u ON t.user_id = u.id JOIN packages p ON t.package_id = p.id WHERE t.payment_id = $1',
+        [paymentId]
+      );
+
+      if (transactionResult.rows.length === 0) {
+        return res.status(404).json({ message: 'Transaction not found' });
+      }
+
+      const transaction = transactionResult.rows[0];
+      console.log('Payment Complete endpoint: Transaction found', { transactionId: transaction.id });
+
+      // Complete payment with Pi Network (with retry mechanism)
+      let completed = false;
+      const maxRetries = 3;
+      const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+      
+      // Only attempt Pi Network completion if we have a real Pi Server API Key
+      if (isPiServerConfigured()) {
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+          try {
+            const piResponse = await fetch(`https://api.minepi.com/v2/payments/${paymentId}/complete`, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Key ${process.env.PI_SERVER_API_KEY}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ txid })
+            });
+            
+            if (piResponse.ok) {
+              console.log('Payment Complete endpoint: Pi Network completion successful');
+              completed = true;
+              break;
+            } else {
+              console.error(`Payment Complete endpoint: Pi Network completion attempt ${attempt + 1} failed with status:`, piResponse.status);
+              const errorData = await piResponse.text();
+              console.error('Payment Complete endpoint: Pi Network error data:', errorData);
+            }
+          } catch (piError: any) {
+            console.error(`Payment Complete endpoint: Pi Network completion attempt ${attempt + 1} failed:`, piError.message);
+            
+            // If this is not the last attempt and the error might be temporary, wait before retrying
+            if (attempt < maxRetries - 1) {
+              const waitTime = Math.pow(2, attempt) * 2000; // 2s, 4s, 6s
+              console.warn(`Payment Complete endpoint: Retry ${attempt + 1}/${maxRetries}: Waiting ${waitTime/1000}s before retrying...`);
+              await delay(waitTime);
+            }
+          }
+        }
+        
+        if (!completed) {
+          console.log('Payment Complete endpoint: Payment completion failed with Pi Network API, but continuing with local transaction completion');
+          // Even if Pi Network API fails, we still want to complete the local transaction
+          // This prevents users from losing their purchase if there's a temporary Pi Network issue
+        }
+      } else {
+        console.log('Payment Complete endpoint: Pi Server API Key not configured, skipping Pi Network completion');
+      }
+
+      // Get payment details to extract wallet address
+      // Try multiple times in case the payment details are not immediately available
+      let walletAddress = '';
+      
+      // Only attempt to get wallet address if we have a real Pi Server API Key
+      if (isPiServerConfigured()) {
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            const paymentDetailsResponse = await fetch(`https://api.minepi.com/v2/payments/${paymentId}`, {
+              headers: {
+                'Authorization': `Key ${process.env.PI_SERVER_API_KEY}`,
+              }
+            });
+            
+            if (paymentDetailsResponse.ok) {
+              const paymentDetails = await paymentDetailsResponse.json();
+              if (paymentDetails && paymentDetails.from_address) {
+                walletAddress = paymentDetails.from_address;
+                console.log(`Payment Complete endpoint: Wallet address extracted on attempt ${attempt}:`, walletAddress);
+                break;
+              }
+            }
+          } catch (detailsError) {
+            console.error(`Payment Complete endpoint: Attempt ${attempt} to get payment details failed:`, detailsError);
+          }
+          
+          if (attempt < 3) {
+            console.log(`Payment Complete endpoint: Attempt ${attempt} to get payment details failed, retrying in 2 seconds...`);
+            await delay(2000);
+          }
+        }
+      }
+      
+      // If we still don't have the wallet address from Pi Network, 
+      // check if we already have it stored for this user
+      if (!walletAddress && transaction.user_wallet_address) {
+        walletAddress = transaction.user_wallet_address;
+        console.log('Payment Complete endpoint: Using existing wallet address from user record:', walletAddress);
+      }
+
+      // Update user's wallet address if it's not already set
+      if (walletAddress && !transaction.user_wallet_address) {
+        try {
+          await client.query(
+            'UPDATE app_users SET wallet_address = $1, updated_at = NOW() WHERE id = $2',
+            [walletAddress, transaction.user_id]
+          );
+          console.log('Payment Complete endpoint: User wallet address updated:', transaction.user_id, walletAddress);
+        } catch (updateError) {
+          console.error('Payment Complete endpoint: Failed to update user wallet address:', updateError);
+        }
+      } else if (!walletAddress) {
+        console.log('Payment Complete endpoint: No wallet address available for user:', transaction.user_id);
+      }
+
+      // Update transaction with txid and completed status
+      await client.query(
+        'UPDATE transactions SET status = $1, txid = $2, updated_at = NOW() WHERE id = $3',
+        ['completed', txid, transaction.id]
+      );
+      
+      console.log('Payment Complete endpoint: Transaction completed successfully', { transactionId: transaction.id });
+
+      // Send confirmation emails only for successful transactions
+      try {
+        if (transaction.user_email && transaction.package_name) {
+          // Convert gameAccount object to string for email
+          const gameAccountString = typeof transaction.game_account === 'string' 
+            ? transaction.game_account 
+            : JSON.stringify(transaction.game_account);
+          
+          // Send email to user
+          try {
+            console.log('Payment Complete endpoint: Attempting to send purchase confirmation email to user:', transaction.user_email);
+            const userEmailResult = await sendPurchaseConfirmationEmail({
+              to: transaction.user_email,
+              username: transaction.user_username,
+              packageName: transaction.package_name,
+              piAmount: transaction.pi_amount,
+              usdAmount: transaction.usd_amount,
+              gameAccount: gameAccountString,
+              transactionId: transaction.id,
+              paymentId: paymentId,
+              isTestnet: false, // Always false for mainnet
+            });
+            
+            if (userEmailResult) {
+              console.log('Payment Complete endpoint: Purchase confirmation email sent successfully to user:', transaction.user_email);
+              
+              // Update transaction to mark email as sent
+              await client.query(
+                'UPDATE transactions SET email_sent = true, updated_at = NOW() WHERE id = $1',
+                [transaction.id]
+              );
+            } else {
+              console.log('Payment Complete endpoint: Failed to send purchase confirmation email to user:', transaction.user_email);
+            }
+          } catch (userEmailError) {
+            console.error('Payment Complete endpoint: User confirmation email sending failed:', userEmailError);
+            // Don't fail the transaction if user email fails
+          }
+
+          // Send email to admins
+          try {
+            console.log('Payment Complete endpoint: Attempting to send purchase notification email to admins');
+            
+            // Get all active admins
+            const adminsResult = await client.query(
+              'SELECT email FROM admins WHERE is_active = true AND email IS NOT NULL'
+            );
+            
+            const admins = adminsResult.rows;
+            let adminEmailsSent = 0;
+            
+            for (const admin of admins) {
+              if (admin.email) {
+                try {
+                  const adminEmailResult = await sendAdminPurchaseNotification({
+                    adminEmail: admin.email,
+                    username: transaction.user_username,
+                    userEmail: transaction.user_email,
+                    userPhone: transaction.user_phone || 'Not provided',
+                    packageName: transaction.package_name,
+                    game: transaction.package_game,
+                    inGameAmount: transaction.package_in_game_amount,
+                    piAmount: transaction.pi_amount,
+                    usdAmount: transaction.usd_amount,
+                    gameAccount: gameAccountString,
+                    transactionId: transaction.id,
+                    paymentId: paymentId,
+                    txid: txid,
+                  });
+                  
+                  if (adminEmailResult) {
+                    adminEmailsSent++;
+                    console.log('Payment Complete endpoint: Purchase notification email sent successfully to admin:', admin.email);
+                  } else {
+                    console.log('Payment Complete endpoint: Failed to send purchase notification email to admin:', admin.email);
+                  }
+                } catch (adminEmailError) {
+                  console.error('Payment Complete endpoint: Failed to send email to admin:', admin.email, adminEmailError);
+                }
+              }
+            }
+            
+            console.log(`Payment Complete endpoint: Sent purchase notification emails to ${adminEmailsSent} out of ${admins.length} admins`);
+          } catch (adminEmailError) {
+            console.error('Payment Complete endpoint: Admin notification email sending failed:', adminEmailError);
+            // Don't fail the transaction if admin email fails
+          }
+        } else {
+          console.log('Payment Complete endpoint: Skipping email sending - missing user email or package name');
+          if (!transaction.user_email) console.log('Payment Complete endpoint: User email not set for user:', transaction.user_id);
+          if (!transaction.package_name) console.log('Payment Complete endpoint: Package name not found for transaction:', transaction.id);
+        }
+      } catch (emailError) {
+        console.error('Payment Complete endpoint: Email sending failed:', emailError);
+        // Don't fail the transaction if email fails
+      }
+
+      res.status(200).json({ success: true, transactionId: transaction.id, txid });
+    } finally {
+      client.release();
+    }
+  } catch (error: any) {
+    console.error('Payment Complete endpoint: Completion error:', error);
+    res.status(500).json({ message: 'Payment completion failed', error: error.message });
+  }
+}
+
+async function handleIncompletePayment(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ message: "Method not allowed" });
+  }
+
+  try {
+    console.log('Incomplete Payment endpoint: Incomplete payment report received', {
+      body: req.body,
+      headers: req.headers
+    });
+    
+    const { paymentId } = req.body;
+    if (!paymentId) {
+      console.log('Incomplete Payment endpoint: Payment ID missing in request body', req.body);
+      return res.status(400).json({ message: 'Payment ID required' });
+    }
+
+    // Check if we have a real Pi Server API Key
+    if (isPiServerConfigured()) {
+      console.log('Incomplete Payment endpoint: Reporting to main server API');
+      
+      try {
+        // Report incomplete payment to the main server API
+        // Use the deployed Vercel app URL for server API calls
+        const serverUrl = process.env.SERVER_BASE_URL || 'https://b4uesportstest.vercel.app';
+        
+        const serverResponse = await fetch(`${serverUrl}/api/payment/incomplete`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ paymentId })
+        });
+        
+        if (!serverResponse.ok) {
+          throw new Error(`Failed to report incomplete payment to server: ${serverResponse.status} ${serverResponse.statusText}`);
+        }
+        
+        const reportData = await serverResponse.json();
+        console.log('Incomplete Payment endpoint: Reported to server successfully');
+        
+        return res.status(200).json(reportData);
+      } catch (serverError: any) {
+        console.error('Incomplete Payment endpoint: Server API error:', serverError.message);
+        return res.status(500).json({ 
+          message: 'Failed to report incomplete payment to server', 
+          error: serverError.message 
+        });
+      }
+    }
+
+    // If we don't have a real Pi Server API Key, return an error
+    console.log('Incomplete Payment endpoint: Pi Server API Key not configured');
+    return res.status(500).json({ message: 'Pi Server API Key not configured' });
+  } catch (error: any) {
+    console.error('Incomplete Payment endpoint: Report error:', error);
+    res.status(500).json({ 
+      message: 'Incomplete payment report failed', 
+      error: error.message 
+    });
+  }
+}
+
+async function handlePaymentCreate(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "POST") {
+    console.log('Payment Create endpoint: Method not allowed', req.method);
+    return res.status(405).json({ message: "Method not allowed" });
+  }
+
+  try {
+    console.log('Payment Create endpoint: Payment creation request received', {
+      body: req.body,
+      headers: req.headers
+    });
+    
+    const { paymentId, paymentData } = req.body;
+    if (!paymentId || !paymentData) {
+      console.log('Payment Create endpoint: Payment ID or data missing in request body', req.body);
+      return res.status(400).json({ message: 'Payment ID and data required' });
+    }
+
+    // Check if we have a real Pi Server API Key
+    if (isPiServerConfigured()) {
+      console.log('Payment Create endpoint: Pi Server API Key configured, creating payment directly');
+      
+      // In the Vercel API endpoint, we should directly process the payment creation
+      // rather than making a request to another endpoint which creates a loop
+      try {
+        // Return success response directly
+        console.log('Payment Create endpoint: Payment created successfully');
+        return res.status(200).json({ 
+          message: 'Payment created successfully',
+          paymentId,
+          paymentData
+        });
+      } catch (serverError: any) {
+        console.error('Payment Create endpoint: Payment creation error:', serverError.message);
+        return res.status(500).json({ 
+          message: 'Failed to create payment', 
+          error: serverError.message 
+        });
+      }
+    }
+
+    // If we don't have a real Pi Server API Key, return an error
+    console.log('Payment Create endpoint: Pi Server API Key not configured');
+    return res.status(500).json({ message: 'Pi Server API Key not configured' });
+  } catch (error: any) {
+    console.error('Payment Create endpoint: Creation error:', error);
+    res.status(500).json({ 
+      message: 'Payment creation failed', 
+      error: error.message
+    });
+  }
+}
+
+async function handleAdminLogin(req: VercelRequest, res: VercelResponse) {
+  // Implementation would go here
+  return res.status(200).json({ message: 'Admin login endpoint placeholder' });
+}
+
+async function handleAddUserTokens(req: VercelRequest, res: VercelResponse) {
+  // Implementation would go here
+  return res.status(200).json({ message: 'Add user tokens endpoint placeholder' });
+}
+
+async function handleReferralReward(req: VercelRequest, res: VercelResponse) {
+  // Implementation would go here
+  return res.status(200).json({ message: 'Referral reward endpoint placeholder' });
+}
+
+async function handleReferralStats(req: VercelRequest, res: VercelResponse) {
+  // Implementation would go here
+  return res.status(200).json({ message: 'Referral stats endpoint placeholder' });
+}
+
+async function handleUserBalance(req: VercelRequest, res: VercelResponse) {
+  // Implementation would go here
+  return res.status(200).json({ message: 'User balance endpoint placeholder' });
+}
+
+// Function to handle referral code usage
+async function handleTest(req: VercelRequest, res: VercelResponse) {
+  res.status(200).json({ message: 'Test endpoint working' });
+}
+
+// Function to handle referral code usage
+async function handleReferralCodeUsage(client: any, userId: string, referralCode: string): Promise<{ success: boolean; message: string; tokensAwarded?: number }> {
+  try {
+    // 1. Validate referral code
+    const referrer = await client.query(
+      `SELECT user_id FROM referral_codes WHERE code = $1`,
+      [referralCode]
+    );
+
+    if (referrer.rows.length === 0) {
+      return { success: false, message: "Invalid referral code", tokensAwarded: 0 };
+    }
+
+    const referrerId = referrer.rows[0].user_id;
+
+    // 2. Prevent self-referral
+    if (referrerId === userId) {
+      return { success: false, message: "You cannot use your own referral code", tokensAwarded: 0 };
+    }
+
+    // 3. Check if this user already used a code
+    const existing = await client.query(
+      `SELECT id FROM referral_rewards WHERE referred_user_id = $1`,
+      [userId]
+    );
+    
+    if (existing.rows.length > 0) {
+      return { success: false, message: "Referral already used", tokensAwarded: 0 };
+    }
+
+    // 4. Create referral record
+    const rewardAmount = 5;
+
+    await client.query(
+      `INSERT INTO referral_rewards (referrer_id, referred_user_id, tokens_awarded, reward_status, awarded_at)
+       VALUES ($1, $2, $3, 'awarded', NOW())`,
+      [referrerId, userId, rewardAmount]
+    );
+
+    // 5. Update token balances for both users
+    await client.query(
+      `UPDATE app_users SET tokens = COALESCE(tokens, 0) + $1 WHERE id = $2`,
+      [rewardAmount, referrerId]
+    );
+    
+    await client.query(
+      `UPDATE app_users SET tokens = COALESCE(tokens, 0) + $1 WHERE id = $2`,
+      [rewardAmount, userId]
+    );
+
+    // 6. Return success
+    return { success: true, message: "Referral processed successfully", tokensAwarded: rewardAmount };
+  } catch (err) {
+    console.error("Referral error:", err);
+    return { success: false, message: "Internal server error", tokensAwarded: 0 };
+  }
+}
+
+// Function to generate a referral code
+function generateReferralCode() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let code = 'REF'; // Prefix with REF as in the database function
+  for (let i = 0; i < 6; i++) { // 6 random characters to match the database function
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
+}
+
+// Add function to get user's referral code from the referral_codes table
+async function getUserReferralCode(userId: string): Promise<string | undefined> {
+  const client = await pool.connect();
+  try {
+    const result = await client.query(
+      'SELECT code FROM referral_codes WHERE user_id = $1',
+      [userId]
+    );
+    
+    return result.rows.length > 0 ? result.rows[0].code : undefined;
+  } catch (error) {
+    console.error('Error fetching referral code for user:', userId, error);
+    return undefined;
+  } finally {
+    client.release();
+  }
+}
+
+// Implement rewardReferrer function directly in this file
+async function rewardReferrer(referredUserId: string): Promise<void> {
+  const client = await pool.connect();
+  try {
+    // First, get the referred user to find who referred them
+    const referredUserResult = await client.query(
+      'SELECT id, referred_by FROM app_users WHERE id = $1',
+      [referredUserId]
+    );
+    
+    const referredUser = referredUserResult.rows[0];
+    
+    if (!referredUser || !referredUser.referred_by) {
+      console.log('No referrer found for user', referredUserId);
+      return;
+    }
+    
+    // Get the referrer user through the referral_codes table
+    const referrerResult = await client.query(
+      'SELECT user_id FROM referral_codes WHERE code = $1',
+      [referredUser.referred_by]
+    );
+    
+    const referrer = referrerResult.rows[0];
+    
+    if (!referrer) {
+      console.log('Referrer not found with code', referredUser.referred_by);
+      return;
+    }
+    
+    // Add 5 tokens to the referrer
+    await client.query(
+      'UPDATE app_users SET tokens = tokens + 5, updated_at = NOW() WHERE id = $1',
+      [referrer.user_id]
+    );
+    
+    console.log(`Added 5 referral tokens to user ${referrer.user_id} for referring user ${referredUserId}`);
+  } finally {
+    client.release();
+  }
+}
+
+// Function to handle referral code usage
+async function handleReferralCodeUsage(referralCode: string, userId: string) {
+  const client = await pool.connect();
+  try {
+    const referral = await client.query(
+      'SELECT * FROM referrals WHERE code = $1',
+      [referralCode]
+    );
+
+    if (referral.rows.length === 0) {
+      throw new Error('Invalid referral code');
+    }
+
+    const referralId = referral.rows[0].id;
+
+    // Check if the user has already used this referral code
+    const existingUsage = await client.query(
+      'SELECT * FROM referral_usages WHERE referral_id = $1 AND user_id = $2',
+      [referralId, userId]
+    );
+
+    if (existingUsage.rows.length > 0) {
+      throw new Error('Referral code already used');
+    }
+
+    // Insert the referral usage
+    await client.query(
+      'INSERT INTO referral_usages (referral_id, user_id) VALUES ($1, $2)',
+      [referralId, userId]
+    );
+
+    // Update the referral count
+    await client.query(
+      'UPDATE referrals SET count = count + 1 WHERE id = $1',
+      [referralId]
+    );
+
+    return { success: true };
+  } catch (error) {
+    console.error('Error handling referral code usage:', error);
+    return { success: false, error: error.message };
+  } finally {
+    client.release();
+  }
+}
+
+// Function to get referral stats for a user
+async function getUserReferralStats(userId: string) {
+  const client = await pool.connect();
+  try {
+    // Get total referral tokens earned
+    const totalReferralTokensResult = await client.query(
+      `SELECT COALESCE(SUM(tokens_awarded), 0) as total_referral_tokens
+       FROM referral_rewards
+       WHERE referrer_id = $1`,
+      [userId]
+    );
+    
+    // Get number of users referred
+    const referredUsersCountResult = await client.query(
+      `SELECT COUNT(*) as referred_users_count
+       FROM referral_rewards
+       WHERE referrer_id = $1`,
+      [userId]
+    );
+    
+    // Get recent referrals
+    const recentReferralsResult = await client.query(
+      `SELECT 
+         au.username,
+         rr.created_at,
+         rr.tokens_awarded
+       FROM referral_rewards rr
+       JOIN app_users au ON rr.referred_user_id = au.id
+       WHERE rr.referrer_id = $1
+       ORDER BY rr.created_at DESC
+       LIMIT 10`,
+      [userId]
+    );
+    
+    return {
+      totalReferralTokens: parseInt(totalReferralTokensResult.rows[0].total_referral_tokens),
+      referredUsersCount: parseInt(referredUsersCountResult.rows[0].referred_users_count),
+      recentReferrals: recentReferralsResult.rows
+    };
+  } catch (error) {
+    console.error('Error fetching referral stats for user:', userId, error);
+    return {
+      totalReferralTokens: 0,
+      referredUsersCount: 0,
+      recentReferrals: []
+    };
+  } finally {
+    client.release();
+  }
+}
+
+// Main handler function
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // Add CORS headers for Pi Browser compatibility
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  
+  // Log all incoming requests for debugging
+  console.log('API Handler: Incoming request', {
+    method: req.method,
+    url: req.url,
+    query: req.query,
+    headers: req.headers
+  });
+  
+  // Extract endpoint from URL
+  const url = req.url || '';
+  console.log('API Handler: Processing URL:', url);
+  
+  // Remove query parameters if present and extract path
+  const fullPath = url.split('?')[0] || '';
+  console.log('API Handler: Full path without query params:', fullPath);
+  
+  // Log the request method specifically for auth endpoint
+  if (fullPath === '/api/auth/pi') {
+    console.log('API Handler: Request method for /api/auth/pi:', req.method);
+    console.log('API Handler: Request body for /api/auth/pi:', req.body);
+  }
+  
+  // Handle different endpoints based on URL path
+  if (fullPath === '/api/packages') {
+    console.log('API Handler: Routing to handlePackages');
+    return handlePackages(req, res);
+  }
+  
+  if (fullPath === '/api/pi-price') {
+    console.log('API Handler: Routing to handlePiPrice');
+    return handlePiPrice(req, res);
+  }
+  
+  if (fullPath === '/api/profile') {
+    console.log('API Handler: Routing to handleProfile');
+    return handleProfile(req, res);
+  }
+  
+  if (fullPath === '/api/transactions') {
+    console.log('API Handler: Routing to handleTransactions');
+    return handleTransactions(req, res);
+  }
+  
+  if (fullPath === '/api/auth/pi') {
+    console.log('API Handler: Routing to handlePiAuth for path:', fullPath);
+    console.log('API Handler: Method for handlePiAuth:', req.method);
+    return handlePiAuth(req, res);
+  }
+  
+  if (fullPath === '/api/payment/approve') {
+    console.log('API Handler: Routing to handlePaymentApprove');
+    return handlePaymentApprove(req, res);
+  }
+  
+  if (fullPath === '/api/payment/complete') {
+    console.log('API Handler: Routing to handlePaymentComplete');
+    return handlePaymentComplete(req, res);
+  }
+  
+  if (fullPath === '/api/payment/incomplete') {
+    console.log('API Handler: Routing to handleIncompletePayment');
+    return handleIncompletePayment(req, res);
+  }
+  
+  if (fullPath === '/api/payment/create') {
+    console.log('API Handler: Routing to handlePaymentCreate');
+    return handlePaymentCreate(req, res);
+  }
+  
+  if (fullPath === '/api/admin/login') {
+    console.log('API Handler: Routing to handleAdminLogin');
+    return handleAdminLogin(req, res);
+  }
+  
+  if (fullPath === '/api/user/tokens/add') {
+    console.log('API Handler: Routing to handleAddUserTokens');
+    return handleAddUserTokens(req, res);
+  }
+  
+  if (fullPath === '/api/user/referral/reward') {
+    console.log('API Handler: Routing to handleReferralReward');
+    return handleReferralReward(req, res);
+  }
+  
+  if (fullPath === '/api/user/referral/stats') {
+    console.log('API Handler: Routing to handleReferralStats');
+    return handleReferralStats(req, res);
+  }
+  
+  if (fullPath === '/api/user/balance') {
+    console.log('API Handler: Routing to handleUserBalance');
+    return handleUserBalance(req, res);
+  }
+  
+  if (fullPath === '/api/debug/config') {
+    console.log('API Handler: Routing to handleDebugConfig');
+    return handleDebugConfig(req, res);
+  }
+  
+  if (fullPath === '/api/debug/env') {
+    console.log('API Handler: Routing to handleDebugEnv');
+    return handleDebugEnv(req, res);
+  }
+  
+  if (fullPath === '/api/pinet/meta') {
+    console.log('API Handler: Routing to handlePiNetMeta');
+    return handlePiNetMeta(req, res);
+  }
+  
+  // Handle duplicated path requests (common misconfiguration in Pi Developer Portal)
+  if (fullPath === '/api/pinet/meta/pinet/meta') {
+    console.log('API Handler: Routing duplicated path /api/pinet/meta/pinet/meta to handlePiNetMeta');
+    return handlePiNetMeta(req, res);
+  }
+  
+  // Handle payment metadata requests for Pi Network payment validation
+  if (fullPath === '/api/pinet/payment-meta') {
+    console.log('API Handler: Routing to payment metadata endpoint');
+    // Import and call the payment metadata handler
+    const { default: paymentMetaHandler } = await import('./pinet/payment-meta');
+    return paymentMetaHandler(req, res);
+  }
+  
+  // Handle duplicated path requests for payment metadata (common misconfiguration in Pi Developer Portal)
+  if (fullPath === '/api/pinet/payment-meta/pinet/meta' || fullPath === '/api/pinet/payment-meta/pinet/payment-meta') {
+    console.log('API Handler: Routing duplicated path to payment metadata endpoint');
+    // Import and call the payment metadata handler
+    const { default: paymentMetaHandler } = await import('./pinet/payment-meta');
+    return paymentMetaHandler(req, res);
+  }
+  
+  if (fullPath === '/api/test-pinet') {
+    console.log('API Handler: Routing to handlePiNetMeta (test-pinet)');
+    return handlePiNetMeta(req, res);
+  }
+  
+  // Default 404 for unmatched routes
+  console.log('API Handler: Endpoint not found for path:', fullPath);
+  return res.status(404).json({ message: 'Endpoint not found' });
+}
+

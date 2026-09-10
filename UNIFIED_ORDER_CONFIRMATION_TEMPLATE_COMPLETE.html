@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Order Confirmation - {{order_id}}</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            line-height: 1.6; 
+            color: #333; 
+            margin: 0; 
+            padding: 0;
+        }
+        .container { 
+            max-width: 600px; 
+            margin: 20px auto; 
+            padding: 20px; 
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            background-color: #f9f9f9;
+        }
+        .header { 
+            background: linear-gradient(135deg, #1e3a8a, #7c3aed); 
+            color: white; 
+            padding: 20px; 
+            text-align: center; 
+            border-radius: 8px 8px 0 0;
+        }
+        .logo {
+            height: 60px; 
+            margin-bottom: 20px;
+        }
+        .content { 
+            padding: 20px; 
+            background-color: #ffffff; 
+        }
+        .footer { 
+            padding: 15px; 
+            text-align: center; 
+            font-size: 12px; 
+            color: #666; 
+            background-color: #f0f0f0;
+            border-radius: 0 0 8px 8px;
+        }
+        .order-details { 
+            margin: 20px 0; 
+        }
+        .order-details table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            margin: 15px 0;
+        }
+        .order-details th, .order-details td { 
+            padding: 10px; 
+            border: 1px solid #ddd; 
+            text-align: left; 
+        }
+        .order-details th { 
+            background-color: #f2f2f2; 
+        }
+        .total { 
+            font-weight: bold; 
+            font-size: 18px; 
+            color: #4CAF50; 
+            text-align: right;
+            padding: 10px 0;
+        }
+        .section {
+            margin: 20px 0;
+            padding: 15px;
+            border-left: 4px solid #4CAF50;
+            background-color: #f8f9fa;
+        }
+        .highlight {
+            color: #4CAF50;
+            font-weight: bold;
+        }
+        .pi-network-section {
+            background-color: #f0f8ff;
+            border: 1px solid #4CAF50;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px 0;
+            text-align: center;
+        }
+        .pi-logo {
+            height: 24px;
+            vertical-align: middle;
+            border-radius: 50%;
+            margin: 0 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <img src="https://b4uesports.com/wp-content/uploads/2025/04/cropped-Black_and_Blue_Simple_Creative_Illustrative_Dragons_E-Sport_Logo_20240720_103229_0000-removebg-preview.png" alt="B4U Esports" class="logo">
+            <h1>Order Confirmation</h1>
+            <p>Order ID: {{order_id}}</p>
+        </div>
+        
+        <div class="content">
+            <p>Hello {{recipient_name}},</p>
+            
+            <p>Thank you for your order. Here are the details:</p>
+            
+            <div class="section">
+                <h2>Order Information</h2>
+                <p><strong>Order ID:</strong> <span class="highlight">{{order_id}}</span></p>
+                <p><strong>Order Date:</strong> {{order_date}}</p>
+                <p><strong>Status:</strong> <span class="highlight">{{order_status}}</span></p>
+            </div>
+            
+            <div class="section">
+                <h3>Customer Details</h3>
+                <p><strong>Name:</strong> {{customer_name}}</p>
+                <p><strong>Email:</strong> {{customer_email}}</p>
+                <p><strong>Phone:</strong> {{customer_phone}}</p>
+            </div>
+            
+            <div class="section">
+                <h3>Items Purchased</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Item</th>
+                            <th>Quantity</th>
+                            <th>Price</th>
+                            <th>Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{items}}
+                    </tbody>
+                </table>
+                
+                <p class="total">Total Amount: {{total_amount}}</p>
+            </div>
+            
+            <div class="section">
+                <h3>Transaction Details</h3>
+                <p><strong>Transaction ID:</strong> {{transaction_id}}</p>
+                <p><strong>Payment ID:</strong> {{payment_id}}</p>
+                <p><strong>Game Account:</strong> {{game_account}}</p>
+            </div>
+            
+            <div class="pi-network-section">
+                <p>Payment processed securely with <img src="https://b4uesports.com/wp-content/uploads/2025/04/PI.jpg" alt="Pi Network" class="pi-logo"> Pi Network</p> <!-- TODO: Replace with official Pi Network logo URL -->
+                <p><strong>Pi Amount:</strong> {{pi_amount}}</p>
+            </div>
+            
+            <p>If you have any questions about your order, please contact us at {{support_email}}.</p>
+        </div>
+        
+        <div class="footer">
+            <p>&copy; 2025 B4U Esports. All rights reserved.</p>
+            <p>PI NETWORK™ is a trademark of PI Community Company.</p>
+            <p>{{company_address}}</p>
+            <p>
+                <a href="https://www.facebook.com/b4uesports" style="color: #3b82f6; text-decoration: none; margin: 0 5px;">Facebook</a> | 
+                <a href="https://youtube.com/@b4uesports" style="color: #3b82f6; text-decoration: none; margin: 0 5px;">YouTube</a> | 
+                <a href="https://www.instagram.com/b4uesports" style="color: #3b82f6; text-decoration: none; margin: 0 5px;">Instagram</a>
+            </p>
+        </div>
+    </div>
+</body>
+</html>

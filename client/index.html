@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/src/assets/b4u-favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Secure in-game tokens, digital gift cards, and social media boosting services with Pi Network. Grow your gaming account, stream, and online presence fast." />
+    <meta property="og:title" content="B4U Esports - In-game Tokens & Social Media Boosting Services" />
+    <meta property="og:description" content="Secure in-game tokens, digital gift cards, and social media boosting services with Pi Network. Grow your gaming account, stream, and online presence fast." />
+    <meta property="og:image" content="" />
+    <meta property="og:url" content="https://b4uesportstest.vercel.app" />
+    <meta name="twitter:card" content="summary_large_image" />
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&family=Orbitron:wght@400;500;600;700;800;900&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Font Awesome (Legacy) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha512-iecdLmaskl7CVkqkXNQ/ZH/XLlvWZOJyj7Yy7tcenmpD1ypASozpmT/E0iPtmFIB46ZmdtAc9eNBvH0H/ZpiBw==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <!-- Pi Network SDK -->
+    <script src="https://sdk.minepi.com/pi-sdk.js"></script>
+    <title>B4U Esports - In-game Tokens & Social Growth Services</title>
+  </head>
+  <body>
+    <div id="root">
+      <!-- Native Splash Screen -->
+      <style>
+        #splash-screen {
+          position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+          background: #0b0f19;
+          display: flex; flex-direction: column; justify-content: center; align-items: center;
+          z-index: 9999; font-family: 'Orbitron', sans-serif;
+        }
+        .splash-logo {
+          width: 80px; height: 80px; border-radius: 50%;
+          border: 2px solid rgba(59, 130, 246, 0.5); padding: 5px;
+          animation: splash-pulse 2s infinite ease-in-out; margin-bottom: 24px;
+        }
+        .splash-title {
+          color: white; font-size: 28px; font-weight: 800; letter-spacing: 3px; margin-bottom: 16px;
+          background: linear-gradient(90deg, #60a5fa, #a855f7);
+          -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        }
+        .splash-loader {
+          width: 200px; height: 4px; background: rgba(255,255,255,0.1);
+          border-radius: 4px; overflow: hidden; position: relative;
+        }
+        .splash-loader::after {
+          content: ''; position: absolute; top: 0; left: 0; height: 100%; width: 50%;
+          background: linear-gradient(90deg, #60a5fa, #a855f7);
+          animation: splash-load 1.5s infinite ease-in-out; border-radius: 4px;
+        }
+        @keyframes splash-pulse {
+          0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4); transform: scale(0.95); }
+          70% { box-shadow: 0 0 0 20px rgba(59, 130, 246, 0); transform: scale(1); }
+          100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); transform: scale(0.95); }
+        }
+        @keyframes splash-load { 0% { left: -50%; } 100% { left: 100%; } }
+      </style>
+      <div id="splash-screen">
+        <img src="https://b4uesports.com/wp-content/uploads/2025/04/cropped-Black_and_Blue_Simple_Creative_Illustrative_Dragons_E-Sport_Logo_20240720_103229_0000-removebg-preview.png" alt="B4U Esports" class="splash-logo" onerror="this.src='https://ui-avatars.com/api/?name=B4U&background=0b0f19&color=fff'" />
+        <div class="splash-title">B4U ESPORTS</div>
+        <div class="splash-loader"></div>
+      </div>
+    </div>
+    
+    <!-- User Engagement Tracking for Higher CPM -->
+    <script>
+      // Track user behavior to improve ad targeting and CPM
+      (function() {
+        // Create user profile for ad targeting
+        var userProfile = {
+          timestamp: Date.now(),
+          userAgent: navigator.userAgent,
+          language: navigator.language,
+          screenWidth: screen.width,
+          screenHeight: screen.height,
+          colorDepth: screen.colorDepth,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+        };
+        
+        // Store user profile data
+        window.adUserProfile = userProfile;
+        
+        // Track page visibility for better ad timing
+        document.addEventListener('visibilitychange', function() {
+          if (document.hidden) {
+            window.adUserAwayTime = Date.now();
+          } else {
+            window.adUserReturnTime = Date.now();
+            
+            // If user was away for more than 30 seconds, this might indicate higher engagement
+            // potential for ads when they return
+            if (window.adUserAwayTime && (window.adUserReturnTime - window.adUserAwayTime > 30000)) {
+              window.adHighEngagementOpportunity = true;
+              
+              // Reset after 5 minutes
+              setTimeout(function() {
+                window.adHighEngagementOpportunity = false;
+              }, 300000);
+            }
+          }
+        });
+      })();
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

@@ -1,0 +1,81 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "version": 2,
+  "builds": [
+    {
+      "src": "package.json",
+      "use": "@vercel/static-build",
+      "config": {
+        "distDir": "dist/public"
+      }
+    },
+    {
+      "src": "api/main.ts",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "api/monthly-marketing.ts",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "api/weekly-marketing.ts",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "api/sync-transactions.ts",
+      "use": "@vercel/node"
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/api/sync-transactions",
+      "destination": "/api/sync-transactions.ts"
+    },
+    {
+      "source": "/api/cron/sync-transactions",
+      "destination": "/api/sync-transactions.ts"
+    },
+    {
+      "source": "/api/weekly-marketing",
+      "destination": "/api/weekly-marketing.ts"
+    },
+    {
+      "source": "/api/monthly-marketing",
+      "destination": "/api/monthly-marketing.ts"
+    },
+    {
+      "source": "/api/:path*",
+      "destination": "/api/main.ts"
+    },
+    {
+      "source": "/validation-key.txt",
+      "destination": "/validation-key.txt"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ],
+  "cleanUrls": true,
+  "trailingSlash": false,
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Content-Security-Policy",
+          "value": "frame-ancestors 'self' https://*.minepi.com https://*.pinet.com minepi.com pinet.com;"
+        }
+      ]
+    },
+    {
+      "source": "/scripts/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    }
+  ]
+}

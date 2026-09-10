@@ -1,0 +1,26 @@
+{
+  "common": {
+    "welcome": "Bienvenido",
+    "home": "Inicio",
+    "about": "Acerca de",
+    "contact": "Contacto",
+    "login": "Iniciar sesión",
+    "logout": "Cerrar sesión",
+    "settings": "Configuración",
+    "dashboard": "Panel de control",
+    "profile": "Perfil",
+    "search": "Buscar"
+  },
+  "navigation": {
+    "home": "Inicio",
+    "services": "Servicios",
+    "pricing": "Precios",
+    "support": "Soporte",
+    "account": "Cuenta"
+  },
+  "errors": {
+    "notFound": "Página no encontrada",
+    "unauthorized": "No autorizado",
+    "serverError": "Error del servidor"
+  }
+}

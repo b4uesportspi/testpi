@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Profile Update Email Preview - B4U Esports</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
+    
+    body {
+      font-family: 'Poppins', Arial, sans-serif;
+      line-height: 1.6;
+      color: #333;
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 20px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      background-size: 400% 400%;
+      animation: gradientBG 15s ease infinite;
+    }
+    
+    @keyframes gradientBG {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+    
+    .container {
+      background: rgba(255, 255, 255, 0.95);
+      border-radius: 20px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+      overflow: hidden;
+      backdrop-filter: blur(10px);
+    }
+    
+    .header {
+      background: linear-gradient(135deg, #1e3a8a, #7c3aed);
+      padding: 25px 20px;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+    
+    .header::before {
+      content: "";
+      position: absolute;
+      top: -50%;
+      left: -50%;
+      width: 200%;
+      height: 200%;
+      background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0) 70%);
+      transform: rotate(30deg);
+    }
+    
+    .logo {
+      height: 40px;
+      margin-bottom: 15px;
+      position: relative;
+      z-index: 2;
+    }
+    
+    .header h1 {
+      color: white;
+      margin: 0;
+      font-size: 28px;
+      font-weight: 700;
+      text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+      position: relative;
+      z-index: 2;
+    }
+    
+    .header p {
+      color: #e5e7eb;
+      margin: 10px 0 0 0;
+      font-size: 16px;
+      position: relative;
+      z-index: 2;
+    }
+    
+    .highlight-name {
+      background: linear-gradient(120deg, #f6d365 0%, #fda085 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      font-weight: 700;
+      padding: 0 5px;
+    }
+    
+    .details-section {
+      background: #f8fafc;
+      padding: 25px;
+      border-radius: 15px;
+      margin: 25px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+    }
+    
+    .details-section h2 {
+      color: #1f2937;
+      margin-top: 0;
+      font-size: 24px;
+      text-align: center;
+      position: relative;
+      padding-bottom: 15px;
+    }
+    
+    .details-section h2::after {
+      content: "";
+      position: absolute;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 60px;
+      height: 3px;
+      background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+      border-radius: 3px;
+    }
+    
+    .details-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    
+    .details-table td {
+      padding: 15px 0;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    
+    .details-table tr:last-child td {
+      border-bottom: none;
+    }
+    
+    .details-table td:first-child {
+      font-weight: 600;
+      color: #4b5563;
+      width: 40%;
+    }
+    
+    .details-table td:last-child {
+      color: #1f2937;
+    }
+    
+    .success-box {
+      background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+      border: 1px solid #10b981;
+      padding: 25px;
+      border-radius: 15px;
+      margin: 0 25px 25px;
+      text-align: center;
+    }
+    
+    .success-box p {
+      color: #065f46;
+      margin: 0;
+      font-weight: 600;
+      font-size: 18px;
+    }
+    
+    .success-icon {
+      font-size: 32px;
+      margin-bottom: 10px;
+    }
+    
+    .support-section {
+      text-align: center;
+      margin: 30px 25px;
+      padding: 25px;
+      background: linear-gradient(135deg, #f0f4f8 0%, #e2e8f0 100%);
+      border-radius: 15px;
+    }
+    
+    .support-section p {
+      color: #6b7280;
+      margin: 0 0 15px 0;
+    }
+    
+    .contact-links a {
+      color: #3b82f6;
+      text-decoration: none;
+      margin: 0 10px;
+      font-weight: 500;
+      padding: 8px 15px;
+      border-radius: 20px;
+      background: rgba(59, 130, 246, 0.1);
+      transition: all 0.3s ease;
+    }
+    
+    .contact-links a:hover {
+      background: rgba(59, 130, 246, 0.2);
+      transform: translateY(-2px);
+    }
+    
+    .social-links {
+      margin: 20px 0;
+    }
+    
+    .social-links a {
+      margin: 0 10px;
+      color: #3b82f6;
+      text-decoration: none;
+      font-weight: 500;
+    }
+    
+    .footer {
+      text-align: center;
+      margin-top: 30px;
+      padding-top: 25px;
+      border-top: 1px solid #e5e7eb;
+      color: #6b7280;
+      font-size: 14px;
+    }
+    
+    .pi-powered {
+      margin: 10px 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    
+    .pi-logo {
+      height: 16px;
+      vertical-align: middle;
+      border-radius: 0;
+    }
+    
+    @media (max-width: 600px) {
+      body {
+        padding: 10px;
+      }
+      
+      .container {
+        border-radius: 15px;
+      }
+      
+      .header {
+        padding: 20px 15px;
+      }
+      
+      .header h1 {
+        font-size: 24px;
+      }
+      
+      .details-section, .success-box, .support-section {
+        margin: 20px 15px;
+        padding: 20px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <img src="https://b4uesports.com/wp-content/uploads/2025/04/cropped-Black_and_Blue_Simple_Creative_Illustrative_Dragons_E-Sport_Logo_20240720_103229_0000-removebg-preview.png" alt="B4U Esports" class="logo">
+      <h1>Profile Updated Successfully!</h1>
+      <p>Your account information has been updated</p>
+    </div>
+
+    <div class="details-section">
+      <h2>Updated Profile Information</h2>
+      
+      <table class="details-table">
+        <tr>
+          <td>Username:</td>
+          <td><span class="highlight-name">JohnDoe</span></td>
+        </tr>
+        <tr>
+          <td>Email:</td>
+          <td>johndoe@example.com</td>
+        </tr>
+        <tr>
+          <td>Phone:</td>
+          <td>+1234567890</td>
+        </tr>
+        <tr>
+          <td>Country:</td>
+          <td>United States</td>
+        </tr>
+        <tr>
+          <td>PUBG IGN:</td>
+          <td>JohnDoeGamer</td>
+        </tr>
+        <tr>
+          <td>PUBG UID:</td>
+          <td>PUBG123456</td>
+        </tr>
+        <tr>
+          <td>MLBB User ID:</td>
+          <td>MLBB789012</td>
+        </tr>
+        <tr>
+          <td>MLBB Zone ID:</td>
+          <td>ZONE456</td>
+        </tr>
+        <tr>
+          <td>Clash of Clans Tag:</td>
+          <td>#COC789012</td>
+        </tr>
+        <tr>
+          <td>Referral Code:</td>
+          <td>REF123456</td>
+        </tr>
+      </table>
+    </div>
+
+    <div class="success-box">
+      <div class="success-icon">✅</div>
+      <p>Your profile has been successfully updated and verified.</p>
+    </div>
+
+    <div class="support-section">
+      <p>Need help? Contact our support team:</p>
+      <div class="contact-links">
+        <a href="mailto:info@b4uesports.com">📧 info@b4uesports.com</a>
+        <a href="tel:+97517875099">📞 +975 17875099</a>
+      </div>
+      
+      <div class="social-links">
+        <a href="https://www.facebook.com/b4uesports"><i class="fab fa-facebook-f"></i> Facebook</a>
+        <a href="https://youtube.com/@b4uesports"><i class="fab fa-youtube"></i> YouTube</a>
+        <a href="https://www.instagram.com/b4uesports"><i class="fab fa-instagram"></i> Instagram</a>
+      </div>
+    </div>
+
+    <div class="footer">
+      <p>© 2025 B4U Esports. All Rights Reserved.</p>
+      <div class="pi-powered">
+        <span>Powered by</span>
+        <img src="https://b4uesports.com/wp-content/uploads/2025/04/PI.jpg" alt="Pi Network" class="pi-logo">
+        <span>Pi Network</span>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
